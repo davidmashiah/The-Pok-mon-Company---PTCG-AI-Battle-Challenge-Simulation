@@ -775,6 +775,140 @@ def best_action2(obs: Observation, det: Determinizer, rollout_policy,
     return ranked + [c for c in candidates if c not in ranked]
 
 
+PIMC_STATS = {"calls": 0, "playouts": 0, "terminal": 0, "truncated": 0,
+              "ranked": 0, "no_time": 0, "begin_none": 0}
+
+
+def pimc_terminal(obs: Observation, det: Determinizer, rollout_policy,
+                  candidates, time_budget=6.0, samples=4, max_candidates=6,
+                  max_steps=900):
+    """Rank candidate actions by playing the game OUT TO THE END, many times.
+
+    Why this and not the other two search functions in this file: both of them
+    stop early and hand the position to an evaluator, and BOTH have been
+    measured to make the agent worse --
+
+        1-ply + hand-written evaluate()      v30  0.3500 vs v14
+        2-ply + PIMC, same evaluator         v31  0.0530
+        1-ply + learned value net as leaf    v33  0.3667 vs v43
+
+    The common factor is the evaluator, not the depth. A playout to a terminal
+    state needs no evaluator at all: the engine reports who won, and that is the
+    ground truth we are actually optimising. Both sides are piloted by the same
+    heuristic, so the comparison between candidates is fair even though the
+    absolute play is only heuristic-strength.
+
+    The budget this spends was simply sitting idle: the harness allows 600 s per
+    EPISODE (cabt.json actTimeout=0, remainingOverageTime=600) and the current
+    agents use 0.4 s (v51) to 12.9 s (v43) of it.
+
+    Returns a re-ordered index list, or None to leave the heuristic alone.
+    """
+    PIMC_STATS["calls"] += 1
+    if not HAVE_SEARCH or obs.select is None or obs.current is None:
+        return None
+    if _i(obs.select.context) != _i(SelectContext.MAIN):
+        return None
+    cand = [c for c in candidates][:max_candidates]
+    if len(cand) < 2:
+        return None
+
+    my_index = obs.current.yourIndex
+    t0 = time.time()
+    wins = {a: 0.0 for a in cand}
+    plays = {a: 0 for a in cand}
+    opened = []
+    try:
+        for si in range(max(1, samples)):
+            if time.time() - t0 > time_budget:
+                break
+            kw = det.build(obs, shuffle=(si > 0))
+            if kw is None:
+                return None
+            try:
+                root = search_begin(obs, manual_coin=False, **kw)
+            except Exception:
+                return None
+            if root is None:
+                PIMC_STATS["begin_none"] += 1
+                break
+            for a in cand:
+                if time.time() - t0 > time_budget:
+                    break
+                try:
+                    nxt = search_step(root.searchId, [a])
+                except Exception:
+                    continue
+                if nxt is None:
+                    continue
+                # Release each playout's states AS SOON as it ends, not at the
+                # end of the call. A playout is ~100 search_step calls and a
+                # single call runs hundreds of playouts, so deferring cleanup
+                # leaves tens of thousands of live search states alive at once;
+                # the engine then slows to a crawl and one move took 18 minutes
+                # (worst move 1,089,510 ms -- caught by the gate's per-move
+                # timing, which is exactly what that check is for).
+                mine = [nxt.searchId]
+                cur = nxt
+                res = None
+                for _ in range(max_steps):
+                    if time.time() - t0 > time_budget:
+                        break
+                    sobs = cur.observation
+                    if _over(sobs):
+                        res = sobs.current.result
+                        break
+                    if sobs.select is None or sobs.current is None:
+                        break
+                    try:
+                        sel = rollout_policy(sobs)
+                        nx2 = search_step(cur.searchId, list(sel))
+                    except Exception:
+                        break
+                    if nx2 is None:
+                        break
+                    mine.append(nx2.searchId)
+                    cur = nx2
+                for sid in mine:
+                    try:
+                        search_release(sid)
+                    except Exception:
+                        pass
+                PIMC_STATS["playouts"] += 1
+                if res is None:
+                    PIMC_STATS["truncated"] += 1
+                    continue          # unfinished games tell us nothing
+                PIMC_STATS["terminal"] += 1
+                plays[a] += 1
+                if res == my_index:
+                    wins[a] += 1.0
+                elif res == 2:
+                    wins[a] += 0.5
+    except Exception:
+        return None
+    finally:
+        try:
+            for sid in opened:
+                try:
+                    search_release(sid)
+                except Exception:
+                    pass
+            search_end()
+        except Exception:
+            pass
+
+    scored = [(wins[a] / plays[a], a) for a in cand if plays[a] > 0]
+    if len(scored) < 2:
+        PIMC_STATS["no_time"] += 1
+        return None
+    if abs(max(s for s, _ in scored) - min(s for s, _ in scored)) < 1e-9:
+        return None
+    scored.sort(key=lambda r: -r[0])
+    PIMC_STATS["ranked"] += 1
+    ranked = [a for _, a in scored]
+    return ranked + [c for c in candidates if c not in ranked]
+
+
 def best_action(obs: Observation, det: Determinizer, rollout_policy,
                 candidates, time_budget=1.0, max_candidates=8):
     """Evaluate each candidate MAIN option by simulating the rest of our turn.

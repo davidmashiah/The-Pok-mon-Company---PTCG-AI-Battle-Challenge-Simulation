@@ -271,6 +271,66 @@ games. Judge x2 keeps most of the gain at no measured cost.
   prizes and we give up 3.
 - **The mirror (23.5% @ 0.486)** is untouched and is the largest single bucket.
 
+## 3f. 2026-08-05 (later): our own line was the regression
+
+**Ladder, both active, past the 25-episode threshold:**
+
+| submission | episodes | W-L | win rate | score |
+|---|---|---|---|---|
+| **v51_roman_safe** | 28 | 17-10 | **0.630** | **783.9** |
+| v43_judge2x | 39 | 18-20 | 0.474 | 667.5 |
+
+`v51_roman_safe` is the **public LB-950 agent** (`romanrozen v10`, extracted to
+`work/agents/z_roman950`) that v14→v43 was forked from, plus exactly two safety fixes: a
+loose anti-hang Ability backstop (40/turn, 200/game — an order of magnitude above normal
+play, so it never shapes behaviour) and the deck-loader fix from §3b.
+
+**Everything this project added between v14 and v43 was a net regression worth ~-116
+points.** The local gauntlet said so first: unmodified `z_roman950` beat `v43` head-to-head
+0.5625 (n=160), and `v51` ties it (0.5176, n=199) while beating v43 (0.5350, n=200).
+
+### The deck is NOT the problem — it is the best one available
+`work/tools/deck_choice.py` weights archetype-vs-archetype win rates from 13,444 games
+between REAL players (our code never touching play):
+
+| deck | vs Grimmsnarl | vs Fezandipiti | vs Lopunny | vs Ogerpon | whole-ladder |
+|---|---|---|---|---|---|
+| **Mega Lucario ex (ours)** | 0.535/43 | 0.667/21 | **0.882/51** | **0.842/19** | **0.669** |
+| Mega Lopunny ex | 0.549/11 | 0.600/21 | — | 0.829/38 | 0.619 |
+| Meowth ex | 0.532/57 | 0.622/90 | 0.541/61 | 0.583/72 | 0.551 |
+| Marnie's Grimmsnarl ex | — | 0.513/12 | 0.451/11 | 0.212/13 | 0.438 |
+| Teal Mask Ogerpon ex | 0.788/13 | 0.295/22 | 0.171/38 | — | 0.513 |
+
+Ours is the strongest archetype in the field, and the #1 player (1275) plays it. **Do not
+switch decks.** The §5 claim that Teal Mask Ogerpon was better (0.604 vs our 0.563) does not
+survive being recomputed on the real index — Ogerpon is 0.513.
+
+Caveat: the index names a deck by its ex/Mega-ex Pokemon, so decks whose engine is a plain
+Stage 2 (Alakazam, Crustle, Cinderace) are invisible and appear under whatever ex they
+splash. Read it together with the replay autopsy in §3e.
+
+### Also refuted here
+| idea | result |
+|---|---|
+| **Adding Judge to the roman950 base** | v50 0.430 vs roman950, where v51 (no Judge) gets 0.5176. Judge helps only on OUR weaker base; on the strong base it is a net loss |
+| **Ranking Abilities below the energy attachment** (30000 → 7500) | v52 0.425 vs v51. The largest behavioural divergence from the 1265 pilot does not convert, tried now as ordering rather than as a conditional guard |
+
+### v53_pimc — playout search (the unused 99% of the compute budget)
+`fsearch.pimc_terminal()` ranks candidate actions by **playing the game out to a terminal
+state** many times, both sides piloted by the heuristic. No evaluator: the engine reports the
+winner, which is what we actually optimise. This matters because every earlier search here
+failed *at the evaluator*, not at the depth (v30 0.3500, v31 0.0530, v33 0.3667).
+
+Measured: ~80 ms per complete game, 0 truncated. Gated at 85.5s of the 600s pool.
+
+Two traps it hit, both worth remembering:
+1. **Candidate starvation** — `AdvancedPolicy.choose()` returns `ranked[:maxCount]` and
+   maxCount is 1 on MAIN, so the search received ONE candidate and silently did nothing
+   (0 playouts across a whole game). Rebuild the full ranking from `_score_option`.
+2. **Deferred cleanup** — releasing playout search states only at the end of the call left
+   tens of thousands live; the engine slowed until a single move took **1,089,510 ms**.
+   Release each playout's chain as it finishes. The gate's per-move timing caught this.
+
 ## 4. REFUTED — DO NOT REDO THESE
 
 Each cost hours. All measured, not guessed.
