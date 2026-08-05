@@ -1,0 +1,23 @@
+# --- competition data: large, and not ours to redistribute -------------------
+data/
+public/
+
+# --- generated artefacts -----------------------------------------------------
+work/out/
+*.tar.gz
+*.log
+
+# --- the engine binaries ship with the competition's sample submission --------
+# (libcg.so / cg.dll). Excluded so this repo redistributes no competition
+# binaries; restore them from the sample submission to run anything locally.
+work/lib/cg/
+
+# --- environment -------------------------------------------------------------
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# --- local scratch -----------------------------------------------------------
+deck.csv
+*.tmp
