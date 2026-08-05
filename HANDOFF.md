@@ -331,6 +331,31 @@ Two traps it hit, both worth remembering:
    tens of thousands live; the engine slowed until a single move took **1,089,510 ms**.
    Release each playout's chain as it finishes. The gate's per-move timing caught this.
 
+## 3g. The policy is at a local optimum — hill-climbing found nothing
+
+`work/tools/evolve.py` searches the 16 policy weights AND the decklist against a panel of
+REAL agents (z_roman950 LB-950, w1_alakazam 5th place, w2_archaludon) **plus SELF, the
+reigning champion at weight 0.40** — that last term is what removes the ceiling, since the
+strongest downloadable sparring partner is only a 950 agent.
+
+Nothing is adopted on a screen alone; each change must also win a confirmation run on
+disjoint seeds. That stage rejected roughly **8 of every 10** candidates that screened
+better, exactly as FINDINGS §11 predicted.
+
+Result over ~50 rounds across two runs: panel fitness rose 0.4760 → 0.5120, **and the
+evolved agent is dead even with the champion head-to-head: 0.5050 over 400 games.** The
+fitness gain was selection noise on the panel. A second variant (v55, deck-only search)
+read 0.5213 over 399 games — also inside the interval.
+
+**Conclusion: the weights and the decklist are at a local optimum for this policy
+architecture.** Random hill-climbing against strong opponents, with honest confirmation,
+does not improve it. Do not re-run this search hoping for a different answer; re-run it only
+if the POLICY STRUCTURE changes and the space is therefore new.
+
+One evolved change is worth noting as a warning: the search cut Boss's Orders 3 → 0 and
+added Lunatone 2 → 4. It survived confirmation on the panel and still produced no
+head-to-head gain — a reminder that panel fitness and head-to-head are different questions.
+
 ## 4. REFUTED — DO NOT REDO THESE
 
 Each cost hours. All measured, not guessed.
