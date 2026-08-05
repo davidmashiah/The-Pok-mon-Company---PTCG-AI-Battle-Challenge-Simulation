@@ -35,7 +35,7 @@ COMP = "pokemon-tcg-ai-battle"
 PACE = 1.2
 _last = [0.0]
 
-OUR_SUBS = ["55240371", "55240398", "55236904", "55236896"]
+OUR_SUBS = ["55258637", "55262119"]   # the two v51_roman_safe draws
 
 # archetype signatures: a card that only that deck plays
 ARCHETYPES = [
