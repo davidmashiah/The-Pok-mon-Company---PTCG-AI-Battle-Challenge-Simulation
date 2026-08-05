@@ -1109,7 +1109,7 @@ def _search_decide(obs, base_order, base_scores):
         if best == heur_top:
             return None
         # override only when search shows a real margin (â‰¥ half a prize)
-        if avg[best] < avg[heur_top] + 500.0:
+        if avg[best] < avg[heur_top] + 150.0:
             return None
         _stats["overrides"] += 1
         return best

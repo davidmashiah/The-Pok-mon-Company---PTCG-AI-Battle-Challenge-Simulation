@@ -1005,7 +1005,7 @@ def _search_decide(obs, base_order, base_scores):
     # (ATTACK/END) reached via greedy rollout so no need to branch on them.
     cand = [heur_top]
     for i in base_order[1:]:
-        if sel.option[i].type in (OptionType.ATTACK, OptionType.END):
+        if sel.option[i].type == OptionType.END:
             continue
         if base_scores[i] < 0:
             continue
@@ -1109,7 +1109,7 @@ def _search_decide(obs, base_order, base_scores):
         if best == heur_top:
             return None
         # override only when search shows a real margin (â‰¥ half a prize)
-        if avg[best] < avg[heur_top] + 500.0:
+        if avg[best] < avg[heur_top] + 150.0:
             return None
         _stats["overrides"] += 1
         return best

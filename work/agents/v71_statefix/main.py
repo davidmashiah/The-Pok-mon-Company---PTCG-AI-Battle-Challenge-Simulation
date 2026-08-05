@@ -687,10 +687,10 @@ try:
 except Exception:
     _SEARCH_IMPORT_OK = False
 USE_SEARCH = True          # local_battle.py flips this off unless KEEP_SEARCH=1
-N_DET = 12                  # determinizations
+N_DET = 3                  # determinizations
 K_OPP = 3                  # opponent branching at ply-2 MAIN
 MAX_SUBSTEPS = 40          # per greedy-complete rollout
-TIME_BUDGET_S = 3.0
+TIME_BUDGET_S = 0.80
 SEARCH_MAX_OPTS = 24
 DUMMY_BASIC = 646          # Impidimp (any basic)
 DUMMY_ENERGY = 7           # Dark
@@ -936,49 +936,6 @@ def _advance_forced(sid, cur, owner, deadline, limit=8):
     return sid, cur
 
 
-
-# ---- episode budget guard (added by build_codex_variants.py) ----
-_EPISODE_BUDGET_S = 90.0
-_episode_spent = 0.0
-_episode_last_turn = -1
-
-
-def _episode_budget_reset():
-    global _episode_spent, _episode_last_turn
-    _episode_spent = 0.0
-    _episode_last_turn = -1
-
-
-def _episode_budget_note_turn(turn):
-    """Second, independent new-episode detector: the turn counter went BACKWARDS.
-
-    The primary one is the select == None setup frame, which is how
-    kaggle_environments opens an episode. But that is a property of the harness,
-    not of the game, and the first version of this guard trusted it alone. Under
-    a harness that plays many episodes in one process the budget was consumed
-    once and the agent then silently stopped searching for every later game --
-    reporting 1.3 s of agent time against an allowance of 90 and a win rate that
-    looked perfectly plausible. A turn number that decreases can only mean a new
-    game, whoever is driving.
-    """
-    global _episode_last_turn
-    try:
-        t = int(turn)
-    except (TypeError, ValueError):
-        return
-    if t < _episode_last_turn:
-        _episode_budget_reset()
-    _episode_last_turn = t
-
-
-def _episode_budget_slice():
-    """Seconds this decision may spend. Geometric decay bounds the episode."""
-    remain = _EPISODE_BUDGET_S - _episode_spent
-    if remain <= 2.0:
-        return 0.0
-    return max(0.05, min(TIME_BUDGET_S, remain / 12.0))
-
-
 # ==================== 2-ply minimax ====================
 
 def _search_decide(obs, base_order, base_scores):
@@ -1015,14 +972,12 @@ def _search_decide(obs, base_order, base_scores):
     if len(cand) < 2:
         return None
 
-    _episode_budget_note_turn(getattr(st, 'turn', -1))
-    _slice = _episode_budget_slice()
-    if _slice <= 0.0:
-        return None
     t0 = time.monotonic()
-    deadline = t0 + _slice
+    deadline = t0 + TIME_BUDGET_S
     acc = {i: 0.0 for i in cand}
     n_eval = {i: 0 for i in cand}
+    global pre_turn, ability_used_dudunsparce, ability_used_fezandipiti
+    _sf_saved = (pre_turn, ability_used_dudunsparce, ability_used_fezandipiti)
     began = False
     try:
         for det in range(N_DET):
@@ -1093,8 +1048,6 @@ def _search_decide(obs, base_order, base_scores):
             began = False
 
         elapsed = time.monotonic() - t0
-        global _episode_spent
-        _episode_spent += elapsed
         _stats["calls"] += 1
         _stats["ms"] += elapsed * 1000.0
         # pick: avg over dets, tie-break by heuristic score. Only compare
@@ -1114,13 +1067,14 @@ def _search_decide(obs, base_order, base_scores):
         _stats["overrides"] += 1
         return best
     except Exception as e:
-        _episode_spent += time.monotonic() - t0
         _stats["fail"] += 1
         if not _search_reported:
             print(f"[alak_evo2_s] search crashed: {e!r} â†’ fallback", file=sys.stderr)
             _search_reported = True
         return None
     finally:
+        (pre_turn, ability_used_dudunsparce,
+         ability_used_fezandipiti) = _sf_saved
         if began:
             try:
                 search_end()
@@ -1138,7 +1092,6 @@ def agent(obs_dict):
         return _heuristic_agent(obs_dict)
     if obs.select is None:
         _search_ok = _SEARCH_IMPORT_OK  # new game
-        _episode_budget_reset()
         return my_deck
 
     # base heuristic (incl. ML residual) as fallback + candidate ordering

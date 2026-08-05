@@ -687,10 +687,10 @@ try:
 except Exception:
     _SEARCH_IMPORT_OK = False
 USE_SEARCH = True          # local_battle.py flips this off unless KEEP_SEARCH=1
-N_DET = 12                  # determinizations
+N_DET = 32                  # determinizations
 K_OPP = 3                  # opponent branching at ply-2 MAIN
 MAX_SUBSTEPS = 40          # per greedy-complete rollout
-TIME_BUDGET_S = 3.0
+TIME_BUDGET_S = 8.0
 SEARCH_MAX_OPTS = 24
 DUMMY_BASIC = 646          # Impidimp (any basic)
 DUMMY_ENERGY = 7           # Dark
@@ -938,7 +938,7 @@ def _advance_forced(sid, cur, owner, deadline, limit=8):
 
 
 # ---- episode budget guard (added by build_codex_variants.py) ----
-_EPISODE_BUDGET_S = 90.0
+_EPISODE_BUDGET_S = 240.0
 _episode_spent = 0.0
 _episode_last_turn = -1
 

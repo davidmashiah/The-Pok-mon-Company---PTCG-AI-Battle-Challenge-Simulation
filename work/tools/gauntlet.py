@@ -28,13 +28,25 @@ WORK = os.path.dirname(HERE)
 STORE = os.path.join(WORK, "out", "gauntlet.json")
 
 # Bump whenever the way we DRIVE an agent changes, so games played under two
-# different harnesses can never pool in one cell. h1 -> h2 added the setup call
-# (see _worker.load): without it, an agent that initialises state on the
-# select==None frame was measured crippled. p1_codex determinized its own deck
-# as 60 filler energy for entire games and still won 0.758, so every h1 row
-# involving such an agent UNDERSTATES it. Rows from older harnesses stay in the
-# report as history; they are simply never added to.
-HARNESS = 2
+# different harnesses can never pool in one cell. Rows from older harnesses stay
+# in the report as history; they are simply never added to.
+#
+# h1 -> h2  added the setup call at LOAD time. Without it, an agent that
+#           initialises state on the select==None frame was measured crippled:
+#           p1_codex determinized its own deck as 60 filler energy for entire
+#           games and still won 0.758, so every h1 row involving such an agent
+#           understates it.
+# h2 -> h3  moved the setup call to the start of EVERY GAME, which is what
+#           kaggle_environments actually does -- one process per episode, so the
+#           frame arrives once per episode. Calling it once per PROCESS meant a
+#           worker played 80 games with per-episode state initialised once.
+#           Caught by v65_codex_b12, whose per-episode compute budget is reset
+#           on that frame: it reported 1.3 s of agent time per episode against
+#           an allowance of 90, i.e. it had silently stopped searching after the
+#           first game or two, and the 0.5375 it scored was mostly a measurement
+#           of the plain heuristic. Any agent with per-episode state -- budgets,
+#           ability counters, opponent belief -- was affected.
+HARNESS = 3
 
 
 # ------------------------------------------------------------------ helpers
@@ -177,6 +189,19 @@ def _worker(job):
         p0, p1 = (fa, fb) if a_first else (fb, fa)
         d0, d1 = (da, db) if a_first else (db, da)
         a_idx = 0 if a_first else 1
+        # THE SETUP FRAME, once per EPISODE. kaggle_environments runs one
+        # process per episode, so an agent sees select == None exactly once per
+        # game and legitimately resets per-episode state there. This worker
+        # plays n games in one process, so without re-issuing it, per-episode
+        # state is initialised once and then carries across every later game.
+        # v65_codex_b12 resets its compute budget on this frame and therefore
+        # stopped searching entirely after game 1 -- silently, and the resulting
+        # win rate looked plausible.
+        for f in (p0, p1):
+            try:
+                f({"current": None, "select": None})
+            except Exception:
+                pass
         obs, sd = battle_start(list(d0), list(d1))
         if obs is None:
             err += 1

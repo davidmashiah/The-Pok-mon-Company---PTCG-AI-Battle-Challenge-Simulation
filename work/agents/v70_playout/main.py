@@ -690,7 +690,7 @@ USE_SEARCH = True          # local_battle.py flips this off unless KEEP_SEARCH=1
 N_DET = 12                  # determinizations
 K_OPP = 3                  # opponent branching at ply-2 MAIN
 MAX_SUBSTEPS = 40          # per greedy-complete rollout
-TIME_BUDGET_S = 3.0
+TIME_BUDGET_S = 12.0
 SEARCH_MAX_OPTS = 24
 DUMMY_BASIC = 646          # Impidimp (any basic)
 DUMMY_ENERGY = 7           # Dark
@@ -971,6 +971,11 @@ def _episode_budget_note_turn(turn):
     _episode_last_turn = t
 
 
+def _episode_budget_charge(seconds):
+    global _episode_spent
+    _episode_spent += max(0.0, seconds)
+
+
 def _episode_budget_slice():
     """Seconds this decision may spend. Geometric decay bounds the episode."""
     remain = _EPISODE_BUDGET_S - _episode_spent
@@ -1023,6 +1028,8 @@ def _search_decide(obs, base_order, base_scores):
     deadline = t0 + _slice
     acc = {i: 0.0 for i in cand}
     n_eval = {i: 0 for i in cand}
+    global pre_turn, ability_used_dudunsparce, ability_used_fezandipiti
+    _sf_saved = (pre_turn, ability_used_dudunsparce, ability_used_fezandipiti)
     began = False
     try:
         for det in range(N_DET):
@@ -1121,6 +1128,8 @@ def _search_decide(obs, base_order, base_scores):
             _search_reported = True
         return None
     finally:
+        (pre_turn, ability_used_dudunsparce,
+         ability_used_fezandipiti) = _sf_saved
         if began:
             try:
                 search_end()
@@ -1129,6 +1138,176 @@ def _search_decide(obs, base_order, base_scores):
 
 
 # ==================== entry ====================
+
+# ---- playout search to terminal states (added by build_codex_variants.py) ----
+try:
+    from cg.api import search_release as _search_release
+except Exception:                                        # pragma: no cover
+    _search_release = None
+
+PLAYOUT_MAX_CAND = 3
+PLAYOUT_MAX_STEPS = 700          # a full game is ~100 steps; this only bounds pathology
+PLAYOUT_MIN_PLAYS = 10  # per candidate before it may override anything
+PLAYOUT_MARGIN = 0.08        # win-rate edge required to overrule the heuristic
+_pstats = {"calls": 0, "ran": 0, "playouts": 0, "terminal": 0, "trunc": 0,
+           "considered": 0, "overrides": 0, "fail": 0, "ms": 0.0}
+
+
+def _playout_once(root_sid, a, me_i, deadline):
+    """Play one determinized game to the end after taking action `a`.
+
+    Returns the engine's result, or None if it did not finish. Every search id
+    this creates is released before returning -- see the note above.
+    """
+    mine = []
+    res = None
+    try:
+        ss = search_step(root_sid, [a])
+    except Exception:
+        return None
+    if ss is None:
+        return None
+    mine.append(ss.searchId)
+    sid, cur = ss.searchId, ss.observation
+    for _ in range(PLAYOUT_MAX_STEPS):
+        if time.monotonic() > deadline:
+            break
+        cs = cur.current
+        if cs is None:
+            break
+        if cs.result is not None and cs.result >= 0:
+            res = cs.result
+            break
+        if cur.select is None:
+            break
+        ch, _order = _greedy_pick(cur)
+        if not ch:
+            break
+        try:
+            ss2 = search_step(sid, ch)
+        except Exception:
+            break
+        if ss2 is None:
+            break
+        mine.append(ss2.searchId)
+        sid, cur = ss2.searchId, ss2.observation
+    if _search_release is not None:
+        for _sid in mine:
+            try:
+                _search_release(_sid)
+            except Exception:
+                pass
+    return res
+
+
+def _playout_decide(obs, base_order, base_scores):
+    """Rank candidates by simulated win rate. Returns an index, or None."""
+    global pre_turn, ability_used_dudunsparce, ability_used_fezandipiti
+    _pstats["calls"] += 1
+    if not (USE_SEARCH and _search_ok) or _search_release is None:
+        return None
+    st, sel = obs.current, obs.select
+    if st is None or sel is None or sel.context != SelectContext.MAIN:
+        return None
+    n = len(sel.option)
+    if n < 2 or n > SEARCH_MAX_OPTS or st.turn < 2:
+        return None
+    if getattr(obs, "search_begin_input", None) is None:
+        return None
+
+    # Unlike the 2-ply search, ATTACK stays in the candidate set: which attack
+    # to make is the decision that takes prizes, and a playout can actually
+    # price it because it plays past the end of our turn either way.
+    heur_top = base_order[0]
+    cand = [heur_top]
+    for i in base_order[1:]:
+        if sel.option[i].type == OptionType.END:
+            continue
+        if base_scores[i] < 0:
+            continue
+        cand.append(i)
+        if len(cand) >= PLAYOUT_MAX_CAND:
+            break
+    if len(cand) < 2:
+        return None
+
+    budget = _episode_budget_slice()
+    if budget <= 0.0:
+        return None
+
+    me_i = st.yourIndex
+    t0 = time.monotonic()
+    deadline = t0 + budget
+    wins = {a: 0.0 for a in cand}
+    plays = {a: 0 for a in cand}
+    # Simulated play calls heuristic_scores hundreds of times at hypothetical
+    # turn numbers, and it rewrites pre_turn and both once-per-turn ability
+    # flags as a side effect. Snapshot them or the live game resumes with state
+    # from a line that never happened.
+    _saved = (pre_turn, ability_used_dudunsparce, ability_used_fezandipiti)
+    began = False
+    try:
+        while time.monotonic() < deadline:
+            hidden = _sample_hidden(st, me_i)
+            try:
+                ss0 = search_begin(obs, **hidden)
+            except Exception:
+                return None
+            if ss0 is None:
+                return None
+            began = True
+            root_sid = ss0.searchId
+            for a in cand:
+                if time.monotonic() > deadline:
+                    break
+                res = _playout_once(root_sid, a, me_i, deadline)
+                _pstats["playouts"] += 1
+                if res is None:
+                    _pstats["trunc"] += 1
+                    continue          # an unfinished game tells us nothing
+                _pstats["terminal"] += 1
+                plays[a] += 1
+                if res == me_i:
+                    wins[a] += 1.0
+                elif res == 2:
+                    wins[a] += 0.5
+            try:
+                search_end()
+            except Exception:
+                pass
+            began = False
+    except Exception:
+        _pstats["fail"] += 1
+        return None
+    finally:
+        (pre_turn, ability_used_dudunsparce,
+         ability_used_fezandipiti) = _saved
+        if began:
+            try:
+                search_end()
+            except Exception:
+                pass
+        _pstats["ms"] += (time.monotonic() - t0) * 1000.0
+        # charge the shared episode pool HERE, inside finally: an early return
+        # above must not hand back free wall-clock, or a pathological position
+        # would be re-searched at full budget on every decision.
+        _episode_budget_charge(time.monotonic() - t0)
+
+    if plays.get(heur_top, 0) < PLAYOUT_MIN_PLAYS:
+        return None               # no honest comparison to make
+    _pstats["ran"] += 1
+    rate = {a: wins[a] / plays[a] for a in cand if plays[a] >= PLAYOUT_MIN_PLAYS}
+    if len(rate) < 2 or heur_top not in rate:
+        return None
+    _pstats["considered"] += 1
+    best = max(rate, key=lambda i: (rate[i], -base_order.index(i)))
+    if best == heur_top:
+        return None
+    if rate[best] < rate[heur_top] + PLAYOUT_MARGIN:
+        return None
+    _pstats["overrides"] += 1
+    return best
+
 
 def agent(obs_dict):
     global _search_ok
@@ -1153,7 +1332,9 @@ def agent(obs_dict):
     except Exception:
         return fallback
 
-    pick = _search_decide(obs, base_order, base_scores)
+    pick = _playout_decide(obs, base_order, base_scores)
+    if pick is None:
+        pick = _search_decide(obs, base_order, base_scores)
     if pick is None:
         return fallback
     return [pick]

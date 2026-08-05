@@ -114,13 +114,25 @@ def main():
     if first_a and last_a:
         print(f"agent-time drift: game 0 {first_a:.1f}s -> game {args.games-1} "
               f"{last_a:.1f}s  ({last_a/max(first_a,1e-9):.2f}x)")
-    st = env_a.get("_stats")
-    if isinstance(st, dict):
-        print("agent _stats:", st)
+    # Dump every counter dict the agent exposes. A component that never ran is
+    # the recurring failure here -- five shipped components were silently dead
+    # -- so print the counters rather than trusting that the code is reachable.
+    for name, st in sorted(env_a.items()):
+        if not (name.lower().endswith("stats") and isinstance(st, dict)):
+            continue
+        print(f"\n{name}: {st}")
         if st.get("calls"):
-            print(f"  mean search {st['ms']/st['calls']:.0f} ms over "
-                  f"{st['calls']} calls; overrides "
-                  f"{st.get('overrides',0)}/{st.get('considered',0)}")
+            print(f"  {st['ms']/st['calls']:.0f} ms mean over {st['calls']} calls"
+                  if st.get("ms") else "")
+        if st.get("playouts"):
+            done = st.get("terminal", 0)
+            print(f"  playouts {st['playouts']} -> terminal {done} "
+                  f"({done/max(st['playouts'],1):.1%}), truncated {st.get('trunc',0)}")
+            print(f"  decisions with enough samples {st.get('ran',0)}, "
+                  f"overrides {st.get('overrides',0)}/{st.get('considered',0)}, "
+                  f"failures {st.get('fail',0)}")
+        elif st.get("considered"):
+            print(f"  overrides {st.get('overrides',0)}/{st['considered']}")
     return 0
 
 
