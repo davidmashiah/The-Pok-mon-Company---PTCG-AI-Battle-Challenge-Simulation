@@ -189,8 +189,42 @@ playout does — then makes it *worse*, not better. So the leaf evaluator is not
 constraint on this base either, and "search harder" in any form is spent. The remaining untried
 lever is the policy's own 60+ tunable weights (§6b).
 
-### The gap that is still unexplained
-Our `v61` and the base author's own submission are the same agent, yet:
+### 6b. THE GAP IS EXPLAINED — AND IT SETS THE CEILING ON ADOPTION
+
+Win rate **by opponent rating band**, ours against the base author's live agent:
+
+| opponent rating | ours (55274352) | jazivxt live (55255635) |
+|---|---|---|
+| <700 | 6/6 = 1.000 | 7/7 = 1.000 |
+| 700–800 | 10/18 = 0.556 | 5/7 = 0.714 |
+| **800–900** | **5/14 = 0.357** | **10/13 = 0.769** |
+| 900–1000 | 0/2 | 18/32 = 0.562 |
+| 1000+ | 0/1 | 4/10 = 0.400 |
+
+It is not convergence. So: **pull their live submission's replay and read the decklist out of the
+setup frame.** It is a **Crustle wall + Mega Kangaskhan ex + Cornerstone Mask Ogerpon ex** control
+deck — not Alakazam. Their 960.8 agent is not the notebook we adopted, and it is **not published**:
+its decklist matches neither of their two published notebooks.
+
+Everything public was then tested against `v61`, n=240 each:
+
+| agent | vs v61 |
+|---|---|
+| `p3_crustle` — their *published* Crustle agent (gated ML selector, v29) | **0.4500** |
+| `p4_crustle_live` — that policy piloting their real live decklist | **0.1167** (28-212) |
+| `w1_alakazam`, `w2_archaludon`, `z_roman950`, `w5_grimmsnarl` | all far below |
+
+`p4` is the sharpest lesson available on deck/policy coupling: their own live decklist, copied
+verbatim, **destroys** the published policy — 0.117. A deck is not transferable without the policy
+it was tuned with.
+
+**Conclusion: `v61_codex_safe` is the strongest agent obtainable from public code.** No top-20 team
+publishes anything; the one rank-121 author who does publishes builds older than what they run.
+Reaching 1000 (rank ~100) therefore requires beating every published agent in the competition, not
+adopting one.
+
+### The gap as it looked before that was resolved
+Our `v61` and the base author's *published* agent are the same code, yet:
 
 | submission | episodes | W-L | win rate | score |
 |---|---|---|---|---|
