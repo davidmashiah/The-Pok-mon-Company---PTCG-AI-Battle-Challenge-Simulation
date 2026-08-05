@@ -26,3 +26,6 @@ __pycache__/
 # in this repo could be reconstructed from git.
 /deck.csv
 *.tmp
+
+# per-worker scratch bundles written by tune_weights.py
+work/agents/_tune_w*/

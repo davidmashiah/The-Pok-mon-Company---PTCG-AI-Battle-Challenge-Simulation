@@ -174,13 +174,20 @@ Built by `build_codex_variants.py`, each measured head-to-head against `v61_code
 | `v62_codex_meta` | the base's opponent templates are **empty** unless a Grimmsnarl or Tusk line is visible, so it determinizes most of the field as a deck that cannot exist. Ships our 70 replay-built lists + the validated multiset matcher from `fsearch`. The matcher fires (30/266 decisions) | **0.4542** [0.392, 0.517] n=240 |
 | `v65_codex_b12` | N_DET 3→12, 3.0 s/decision, 90 s/episode. The base uses **8 s of the 600 s pool** | **0.5375** [0.474, 0.599] n=240 |
 | `v71_statefix` | the base's rollouts corrupt `pre_turn` and both once-per-turn ability flags in the live game; snapshot and restore | **0.5208** [0.458, 0.583] n=240 |
-| `v70_playout` | playouts to TERMINAL states, no evaluator, using the base's own heuristic as the rollout policy. Runs correctly: 12,929 playouts, 99.0% terminal, drift 1.00×, overrides 13/100 decisions | **measuring, n=240** |
+| `v70_playout` | playouts to TERMINAL states, no evaluator, using the base's own heuristic as the rollout policy. Runs correctly: 12,929 playouts, 99.0% terminal, drift 1.00×, overrides 13/100 decisions | **0.4625** [0.401, 0.526] n=240 |
 | `v63`/`v64`/`v66`/`v67`/`v68`/`v69` | bigger budgets, lower override margin, branch on attacks | built, unmeasured |
 
-**What v65 tells you, and it is the useful part:** quadrupling determinizations changes nothing,
-so the 2-ply search is limited by the BIAS of `_leaf_eval`, not by the variance of its estimate.
-That matches every search this project has built — the evaluator was always the common factor.
-`v70_playout` is the one design that removes the evaluator entirely.
+**Nothing beats the base.** Four structurally different attacks — more compute, a correctness fix,
+a different search target, and a better opponent model — all land inside the noise. Do not pick the
+highest of four inconclusive readings and call it an improvement; that is the
+screen-without-confirmation mistake that produced 13 false positives here before.
+
+**What v65 and v70 tell you together, and it is the useful part:** quadrupling determinizations
+changes nothing, which says the 2-ply search is limited by the BIAS of `_leaf_eval` rather than by
+the variance of its estimate. Removing the evaluator entirely — which is exactly what a terminal
+playout does — then makes it *worse*, not better. So the leaf evaluator is not the binding
+constraint on this base either, and "search harder" in any form is spent. The remaining untried
+lever is the policy's own 60+ tunable weights (§6b).
 
 ### The gap that is still unexplained
 Our `v61` and the base author's own submission are the same agent, yet:
