@@ -27,11 +27,21 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 WORK = os.path.dirname(HERE)
 STORE = os.path.join(WORK, "out", "gauntlet.json")
 
+# Bump whenever the way we DRIVE an agent changes, so games played under two
+# different harnesses can never pool in one cell. h1 -> h2 added the setup call
+# (see _worker.load): without it, an agent that initialises state on the
+# select==None frame was measured crippled. p1_codex determinized its own deck
+# as 60 filler energy for entire games and still won 0.758, so every h1 row
+# involving such an agent UNDERSTATES it. Rows from older harnesses stay in the
+# report as history; they are simply never added to.
+HARNESS = 2
+
 
 # ------------------------------------------------------------------ helpers
 def bundle_hash(agent):
     """Content hash of everything that affects play: agent files + shared libs."""
     h = hashlib.sha256()
+    h.update(f"harness{HARNESS}".encode())
     parts = []
     d = os.path.join(WORK, "agents", agent)
     for fn in sorted(os.listdir(d)):
@@ -121,12 +131,28 @@ def _worker(job):
         if full not in sys.path:
             sys.path.insert(0, full)
         cwd = os.getcwd()
+        setup_deck = None
         try:
             os.chdir(full)
             with open(os.path.join(full, "main.py"), encoding="utf-8-sig") as fh:
                 src = fh.read()
             env = {}
             exec(compile(src, "main.py", "exec"), env)
+            fn = [v for v in env.values() if callable(v)][-1]
+            # THE SETUP CALL. The real contract (see work/lib/sample_main.py) is
+            # that the first frame of an episode has select == None and the
+            # agent returns its 60 card ids. kaggle_environments always makes
+            # this call, and agents legitimately initialise state in it:
+            # p1_codex assigns its `my_deck` there and nowhere else, so an
+            # episode driven without it runs the whole game determinizing our
+            # OWN deck as 60 filler energy. Issue it here, still inside the
+            # chdir, because agents resolve deck.csv relative to cwd.
+            try:
+                r = fn({"current": None, "select": None})
+                if isinstance(r, (list, tuple)) and len(r) == 60:
+                    setup_deck = [int(x) for x in r]
+            except Exception:
+                pass
         finally:
             os.chdir(cwd)
         fns = [v for v in env.values() if callable(v)]
@@ -135,7 +161,7 @@ def _worker(job):
         # global at all, which made this raise "'NoneType' object is not
         # iterable" and kill the whole run. deck.csv is the contract; fall back
         # to it -- the same rule build_and_gate.py already uses.
-        d = env.get("DECK") or env.get("my_deck") or env.get("MY_DECK")
+        d = setup_deck or env.get("DECK") or env.get("my_deck") or env.get("MY_DECK")
         if not d:
             with open(os.path.join(full, "deck.csv"), encoding="utf-8") as fh:
                 d = [int(x) for x in fh.read().split() if x.strip()]

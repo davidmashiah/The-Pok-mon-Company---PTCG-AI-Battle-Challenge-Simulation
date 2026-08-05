@@ -96,7 +96,24 @@ for _n in ("my_deck", "DECK", "MY_DECK", "deck"):
     if isinstance(_v, list) and len(_v) == 60:
         played = [int(x) for x in _v]
         break
-print(json.dumps({"played": played,
+# THE SETUP CALL. The competition's first frame of an episode has select ==
+# None and the agent returns its 60 card ids -- that list IS the deck the
+# episode plays (see work/lib/sample_main.py). An agent may resolve it there
+# rather than at import: p1_codex leaves `my_deck` empty until this call, so a
+# probe that only reads module globals reports "no decklist" for a perfectly
+# valid bundle. Ask the agent the way the harness does, and let its answer win.
+_setup_err = None
+try:
+    _fns = [v for v in _env.values() if callable(v)]
+    _r = _fns[-1]({"current": None, "select": None})
+    if isinstance(_r, (list, tuple)) and len(_r) == 60:
+        played = [int(x) for x in _r]
+    else:
+        _setup_err = "setup call returned %r len=%s" % (
+            type(_r).__name__, len(_r) if hasattr(_r, "__len__") else "?")
+except Exception as _e:
+    _setup_err = "setup call raised %r" % (_e,)
+print(json.dumps({"played": played, "setup_err": _setup_err,
                   "wrote_files": sorted(os.listdir(os.getcwd()))}))
 '''
 
@@ -128,7 +145,13 @@ def gate_deck_identity(stage_dir, py):
         check("deck-identity probe returned JSON", False, r.stdout[-300:])
         return
     played = info.get("played")
-    check("agent exposes a 60-card decklist", played is not None)
+    check("agent exposes a 60-card decklist", played is not None,
+          info.get("setup_err") or "")
+    # The setup call is how the competition asks for the deck, so an agent that
+    # cannot answer it from a foreign cwd is one absolute path away from
+    # shipping an empty decklist. Report it even when a module global saved us.
+    check("setup call (select=None) returns 60 cards", not info.get("setup_err"),
+          info.get("setup_err") or "")
     if played is None:
         return
     check("deck PLAYED == deck SHIPPED in deck.csv", sorted(played) == shipped,
@@ -199,10 +222,21 @@ _lastname, _last = _items[-1]
 # Bind by the DICT key, not __name__: a wrapper assigned to an existing name
 # keeps that name's original dict position, so the last callable can be an
 # inner/original function whose __name__ still reads "agent".
+#
+# This used to ALSO require that key to be "agent", and that was wrong. Kaggle's
+# get_last_callable binds by position regardless of name, and giving the final
+# entry point a unique name is the deliberate, correct pattern -- the sample
+# agent does it and so does every public bundle we have adopted. The rule
+# rejected p1_codex, whose author sits at rank 121 on this ladder.
+#
+# The hazard the rule was really aimed at (`agent = wrapper` leaves a later
+# helper as the last callable, so the harness runs the helper) is caught
+# properly a few lines down: whatever we bind must answer the setup frame with
+# 60 card ids, and a stray helper will not.
 if _lastname != "agent":
-    print("ERR last callable in module dict is %r (fn __name__=%r); "
-          "kaggle_environments would call that, not agent"
-          % (_lastname, getattr(_last, "__name__", None))); sys.exit(6)
+    print("NOTE last callable in module dict is %r -- kaggle_environments "
+          "binds by dict POSITION, so this is what the competition runs."
+          % (_lastname,))
 
 class agent_mod:
     agent = staticmethod(_last)
@@ -220,6 +254,26 @@ for _n in ("DECK", "my_deck", "MY_DECK", "deck"):
 if agent_mod.DECK is None:
     with open(os.path.join(AG, "deck.csv")) as _fh:
         agent_mod.DECK = [int(x.strip()) for x in _fh if x.strip()][:60]
+
+# THE SETUP CALL, before any game. kaggle_environments opens every episode with
+# select == None, and agents initialise state in it -- p1_codex assigns its
+# `my_deck` here and nowhere else, so a gate that skips the call times and
+# validates an agent whose search determinizes its own deck as filler energy.
+# Whatever it returns is the deck the competition plays, so it also wins here.
+try:
+    _r = agent_mod.agent({"current": None, "select": None})
+except Exception as _e:
+    print("ERR setup call (select=None) raised: %r" % (_e,)); sys.exit(7)
+# This doubles as the identity check for the bound callable: the competition
+# opens every episode this way, so anything that cannot answer it with 60 card
+# ids is not the entry point, whatever it is called.
+if not (isinstance(_r, (list, tuple)) and len(_r) == 60):
+    print("ERR last callable %r answered the setup frame with %r (len %s), "
+          "not 60 card ids -- kaggle_environments would run this and the "
+          "episode would have no deck"
+          % (_lastname, type(_r).__name__,
+             len(_r) if hasattr(_r, "__len__") else "?")); sys.exit(8)
+agent_mod.DECK = [int(x) for x in _r]
 
 from cg.api import to_observation_class
 from cg.game import battle_start, battle_select, battle_finish

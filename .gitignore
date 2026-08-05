@@ -1,6 +1,7 @@
 # --- competition data: large, and not ours to redistribute -------------------
 data/
 public/
+public_new/
 
 # --- generated artefacts -----------------------------------------------------
 work/out/
@@ -19,5 +20,9 @@ __pycache__/
 *.pyo
 
 # --- local scratch -----------------------------------------------------------
-deck.csv
+# Root-anchored: this rule exists for the scratch deck.csv that agents v14-v34
+# wrote into the repo root at import. Unanchored it also matched
+# work/agents/*/deck.csv, so NO agent's decklist was ever tracked and no bundle
+# in this repo could be reconstructed from git.
+/deck.csv
 *.tmp
