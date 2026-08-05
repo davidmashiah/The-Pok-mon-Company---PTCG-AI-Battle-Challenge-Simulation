@@ -1,5 +1,13 @@
 # PTCG AI Battle Challenge — Handoff
 
+> ## ⚠ START WITH `HANDOFF_NEXT.md`
+> That file is the current, self-contained brief: where we actually are, the measurement
+> instrument that makes results trustworthy, the full refuted list, and the next task.
+> **This file is the historical log.** Several of its early sections were later shown to be
+> wrong — in particular §5's claim that Marnie's Grimmsnarl ex is ~53% of the field and our
+> worst matchup. It is 7.4% of our games and we win 0.818. Everything built on that premise
+> (v32–v37) optimised a matchup we already dominate.
+
 **Competition:** `pokemon-tcg-ai-battle` (Kaggle simulation ladder). Deadline **2026-08-16**.
 **Goal:** raise ladder score. Current standing ~**700–780**. Leader (Majkel1337) **1265**. Field median ~**1085**.
 
