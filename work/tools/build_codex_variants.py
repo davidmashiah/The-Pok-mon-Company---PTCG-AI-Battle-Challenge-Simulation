@@ -373,7 +373,15 @@ PLAYOUT_MAX_STEPS = 700          # a full game is ~100 steps; this only bounds p
 PLAYOUT_MIN_PLAYS = {min_plays}  # per candidate before it may override anything
 PLAYOUT_MARGIN = {margin}        # win-rate edge required to overrule the heuristic
 _pstats = {{"calls": 0, "ran": 0, "playouts": 0, "terminal": 0, "trunc": 0,
-           "considered": 0, "overrides": 0, "fail": 0, "ms": 0.0}}
+           "considered": 0, "overrides": 0, "fail": 0, "ms": 0.0,
+           # Diagnostics, so the override threshold is set from the measured
+           # distribution instead of guessed. The first build ran 12,929
+           # playouts and overrode 0 of 107 eligible decisions -- without these
+           # there is no way to tell "the heuristic really is right" from
+           # "the samples are too few for the threshold to ever be met".
+           "edge_n": 0, "edge_sum": 0.0, "edge_max": 0.0,
+           "edge_ge02": 0, "edge_ge05": 0, "edge_ge08": 0,
+           "plays_top_sum": 0, "plays_top_min": 10 ** 9}}
 
 
 def _playout_once(root_sid, a, me_i, deadline):
@@ -523,7 +531,16 @@ def _playout_decide(obs, base_order, base_scores):
     if len(rate) < 2 or heur_top not in rate:
         return None
     _pstats["considered"] += 1
+    _pstats["plays_top_sum"] += plays[heur_top]
+    _pstats["plays_top_min"] = min(_pstats["plays_top_min"], plays[heur_top])
     best = max(rate, key=lambda i: (rate[i], -base_order.index(i)))
+    _edge = rate[best] - rate[heur_top]
+    _pstats["edge_n"] += 1
+    _pstats["edge_sum"] += _edge
+    _pstats["edge_max"] = max(_pstats["edge_max"], _edge)
+    for _t, _k in ((0.02, "edge_ge02"), (0.05, "edge_ge05"), (0.08, "edge_ge08")):
+        if _edge >= _t:
+            _pstats[_k] += 1
     if best == heur_top:
         return None
     if rate[best] < rate[heur_top] + PLAYOUT_MARGIN:
