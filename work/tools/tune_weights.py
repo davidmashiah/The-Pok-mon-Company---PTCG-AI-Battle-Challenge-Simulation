@@ -50,6 +50,11 @@ WORK = os.path.dirname(HERE)
 AGENTS = os.path.join(WORK, "agents")
 OUT = os.path.join(WORK, "out")
 STATE = os.path.join(OUT, "tune_weights.json")
+# Set by --tag so two searches can run side by side on the idle cores with
+# different seeds. They must not share worker directories: the genome is read
+# from a file in the cwd, so a shared dir means one search silently evaluates
+# the other's weights.
+TAG = ""
 
 BASE = "v61_codex_safe"          # champion, and the opponent we optimise against
 WEIGHT_FILE = "alak_w.json"
@@ -88,7 +93,7 @@ def base_weights():
 
 def worker_dir(i):
     """A private copy of the bundle per worker; genome written into it."""
-    d = os.path.join(AGENTS, f"_tune_w{i}")
+    d = os.path.join(AGENTS, f"_tune_w{TAG}{i}")
     os.makedirs(d, exist_ok=True)
     for fn in ("main.py", "deck.csv"):
         src = os.path.join(AGENTS, BASE, fn)
@@ -100,7 +105,9 @@ def worker_dir(i):
 
 def _play(job):
     """Play `n` games: candidate (with genome) vs the unmodified base."""
-    widx, genome, n, seed0 = job
+    widx, genome, n, seed0, tag = job
+    global TAG
+    TAG = tag
     d = worker_dir(widx)
     with open(os.path.join(d, WEIGHT_FILE), "w") as fh:
         json.dump(genome, fh)
@@ -181,7 +188,7 @@ def _play(job):
 
 def evaluate(genome, games, workers, seed0):
     per = max(1, games // workers)
-    jobs = [(i, genome, per, seed0 + i * 7919) for i in range(workers)]
+    jobs = [(i, genome, per, seed0 + i * 7919, TAG) for i in range(workers)]
     w = l = bad = 0
     with ProcessPoolExecutor(max_workers=workers) as ex:
         for r in ex.map(_play, jobs):
@@ -214,7 +221,13 @@ def main():
     ap.add_argument("--workers", type=int, default=3)
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--report", action="store_true")
+    ap.add_argument("--tag", default="", help="suffix for state + worker dirs")
     args = ap.parse_args()
+
+    global STATE, TAG
+    TAG = args.tag
+    if args.tag:
+        STATE = os.path.join(OUT, f"tune_weights_{args.tag}.json")
 
     if args.report:
         if os.path.exists(STATE):
@@ -266,7 +279,7 @@ def main():
             st["accepted"] += 1
             st["history"].append({"round": st["round"], "screen": scr,
                                   "confirm": conf, "pooled": pooled})
-            with open(os.path.join(OUT, "alak_w_best.json"), "w") as fh:
+            with open(os.path.join(OUT, f"alak_w_best{('_'+TAG) if TAG else ''}.json"), "w") as fh:
                 json.dump(cand, fh, indent=1)
         else:
             st["rejected_confirm"] += 1
