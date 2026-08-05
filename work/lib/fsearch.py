@@ -13,6 +13,7 @@ Two guarantees, both load-bearing:
   * Never claim a win we cannot prove. A hallucinated lethal is worse than no
     lethal: we would tap out our board for a line the real game cannot play.
 """
+import math
 import time
 import random as _rnd_mod
 from collections import Counter
@@ -776,7 +777,7 @@ def best_action2(obs: Observation, det: Determinizer, rollout_policy,
 
 
 PIMC_STATS = {"calls": 0, "playouts": 0, "terminal": 0, "truncated": 0,
-              "ranked": 0, "no_time": 0, "begin_none": 0}
+              "ranked": 0, "no_time": 0, "begin_none": 0, "pruned": 0}
 
 
 def pimc_terminal(obs: Observation, det: Determinizer, rollout_policy,
@@ -818,10 +819,23 @@ def pimc_terminal(obs: Observation, det: Determinizer, rollout_policy,
     wins = {a: 0.0 for a in cand}
     plays = {a: 0 for a in cand}
     opened = []
+    live = list(cand)          # candidates still worth spending playouts on
     try:
         for si in range(max(1, samples)):
             if time.time() - t0 > time_budget:
                 break
+            # Drop candidates that cannot catch the leader. Profiling says 88%
+            # of playout time is the engine's search_step, so we cannot make a
+            # playout cheaper -- the only lever is spending playouts where the
+            # decision is actually close. Uniform sampling wastes most of the
+            # budget re-confirming a candidate that was settled after 10 games.
+            # NO PRUNING. Sequential halving was tried here and measured WORSE:
+            # cutting to the top 2 after 15 samples scored 0.3833 against v51
+            # where the unpruned version scored 0.5000. At 15 playouts the
+            # estimate on a candidate is +-0.25, so halving mostly discards the
+            # true best before it has separated. Spreading playouts evenly is
+            # the better use of the budget here; the way to get more resolution
+            # is more budget, which scales (90 s beats 22 s, 0.600 over 60).
             kw = det.build(obs, shuffle=(si > 0))
             if kw is None:
                 return None
@@ -832,7 +846,7 @@ def pimc_terminal(obs: Observation, det: Determinizer, rollout_policy,
             if root is None:
                 PIMC_STATS["begin_none"] += 1
                 break
-            for a in cand:
+            for a in live:
                 if time.time() - t0 > time_budget:
                     break
                 try:
@@ -898,10 +912,12 @@ def pimc_terminal(obs: Observation, det: Determinizer, rollout_policy,
             pass
 
     scored = [(wins[a] / plays[a], a) for a in cand if plays[a] > 0]
+    PIMC_STATS["last"] = [(round(s, 3), a, plays[a]) for s, a in scored]
     if len(scored) < 2:
         PIMC_STATS["no_time"] += 1
         return None
     if abs(max(s for s, _ in scored) - min(s for s, _ in scored)) < 1e-9:
+        PIMC_STATS["all_equal"] = PIMC_STATS.get("all_equal", 0) + 1
         return None
     scored.sort(key=lambda r: -r[0])
     PIMC_STATS["ranked"] += 1
