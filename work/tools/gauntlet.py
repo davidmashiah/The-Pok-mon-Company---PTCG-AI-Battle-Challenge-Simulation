@@ -43,7 +43,12 @@ def bundle_hash(agent):
     # same cell -- the one thing this store exists to prevent. Only agents that
     # actually import it are affected, so hashing it for the others would
     # needlessly invalidate their accumulated games.
-    shared_files = ["policy.py", "fsearch.py"]
+    # meta_decks.py MUST be hashed: it is the opponent-deck library fsearch uses
+    # to determinize hidden zones, so rebuilding it changes how every
+    # search-using agent plays. Leaving it out would pool results from before and
+    # after the rebuild in the same cell -- the one thing this store exists to
+    # prevent.
+    shared_files = ["policy.py", "fsearch.py", "meta_decks.py"]
     try:
         with open(os.path.join(d, "main.py"), encoding="utf-8") as _fh:
             if "import dznp" in _fh.read():
