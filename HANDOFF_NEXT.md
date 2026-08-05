@@ -165,21 +165,42 @@ All measured against real opponents with confirmation. Re-running them wastes da
 
 ---
 
-## 6. WHAT IS IN FLIGHT
+## 6. EVERYTHING TRIED ON THE NEW BASE — ALL INSIDE THE NOISE
 
-Built from the new base by `build_codex_variants.py`, all **untested or in progress**:
+Built by `build_codex_variants.py`, each measured head-to-head against `v61_codex_safe`:
 
-| agent | change | status |
+| agent | change | result vs v61 |
 |---|---|---|
-| `v62_codex_meta` | the base's opponent templates are **empty** unless a Grimmsnarl or Tusk line is visible, so it determinizes most of the field as a deck that cannot exist. Ships our 70 replay-built lists + the validated multiset matcher from `fsearch`. Matcher fires; overrides 30/266 decisions | **measuring vs v61, n=240** |
-| `v65_codex_b12` | N_DET 3→12, 3.0 s/decision, 90 s episode cap. The base uses **6 s of the 600 s pool** | **measuring vs v61, n=240** |
-| `v63`/`v64` | the same at 300 s/episode | built, too slow to measure until the moderate one proves the direction |
+| `v62_codex_meta` | the base's opponent templates are **empty** unless a Grimmsnarl or Tusk line is visible, so it determinizes most of the field as a deck that cannot exist. Ships our 70 replay-built lists + the validated multiset matcher from `fsearch`. The matcher fires (30/266 decisions) | **0.4542** [0.392, 0.517] n=240 |
+| `v65_codex_b12` | N_DET 3→12, 3.0 s/decision, 90 s/episode. The base uses **8 s of the 600 s pool** | **0.5375** [0.474, 0.599] n=240 |
+| `v71_statefix` | the base's rollouts corrupt `pre_turn` and both once-per-turn ability flags in the live game; snapshot and restore | **0.5208** [0.458, 0.583] n=240 |
+| `v70_playout` | playouts to TERMINAL states, no evaluator, using the base's own heuristic as the rollout policy. Runs correctly: 12,929 playouts, 99.0% terminal, drift 1.00×, overrides 13/100 decisions | **measuring, n=240** |
+| `v63`/`v64`/`v66`/`v67`/`v68`/`v69` | bigger budgets, lower override margin, branch on attacks | built, unmeasured |
+
+**What v65 tells you, and it is the useful part:** quadrupling determinizations changes nothing,
+so the 2-ply search is limited by the BIAS of `_leaf_eval`, not by the variance of its estimate.
+That matches every search this project has built — the evaluator was always the common factor.
+`v70_playout` is the one design that removes the evaluator entirely.
+
+### The gap that is still unexplained
+Our `v61` and the base author's own submission are the same agent, yet:
+
+| submission | episodes | W-L | win rate | score |
+|---|---|---|---|---|
+| jazivxt 55255635 | 70 | 44-25 | 0.638 | **960.8** |
+| **ours 55274352** | 37 | 18-18 | 0.500 | **765.3** |
+| Raihan 55177269 (rank 2) | **712** | 422-289 | 0.594 | 1207.5 |
+
+Ruled out so far: the bundled engine is **byte-identical** to the competition's current
+`sample_submission/cg` (all five files hash-match); `group.txt`, which their build ships and ours
+does not, appears in neither the sample submission nor the docs; our safety patch does not change
+play (`v61` vs `p1_codex` 0.439, n=66, CI contains 0.5). Remaining candidates: episode count (Raihan
+needed 712), TrueSkill path dependence, or their 2026-08-05 submission being a newer private
+version than the 2026-07-30 notebook.
 
 ### The one known weakness
-`s_dragapult` 0.450 (n=120) where our old `v14` gets 0.647. Dragapult is not in the top-5 of the
-field we actually face, so it may not matter — but it is the only opponent that beats the new base
-and it is the obvious place to look for the next gain. Re-run `loss_autopsy.py --fetch` once
-55274352 has episodes; the band we are matched into will shift as the score rises.
+`s_dragapult` 0.450 (n=120) where our old `v14` gets 0.647 — the only opponent that beats the new
+base. Not in the top 5 of the field we face, so it may not matter.
 
 ---
 
