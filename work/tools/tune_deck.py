@@ -53,10 +53,35 @@ BEST = os.path.join(OUT, "deck_best.csv")
 
 BASE = "v61_codex_safe"
 
+# THE OBJECTIVE IS THE FIELD, NOT THE CHAMPION.
+# Optimising a head-to-head against v61 optimises the mirror, which we already
+# win 0.934 -- it cannot move the rating. What maps to rating is the weighted
+# win rate across the archetypes we are actually matched into, and the anchor
+# from field_test.py is unambiguous about where the rating is being lost:
+#
+#   Alakazam mirror  0.23  0.934      Crustle control 0.13  0.550
+#   Mega Lucario     0.22  0.818      Archaludon      0.12  0.778
+#   Grimmsnarl       0.20  0.207      Dragapult       0.10  0.449
+#
+#   field 0.6461  ==  726.1 on the ladder
+#
+# Grimmsnarl is a fifth of the field and we win one game in five. Games are
+# allocated by share, so a candidate is rewarded for exactly what the ladder
+# pays for and a mirror-only gain scores nothing.
+FIELD = [
+    ("w1_alakazam",   0.23),
+    ("z_roman950",    0.22),
+    ("w5_grimmsnarl", 0.20),
+    ("p3_crustle",    0.13),
+    ("w2_archaludon", 0.12),
+    ("s_dragapult",   0.10),
+]
+
 # Cards the policy must keep or the deck stops functioning: the Abra evolution
 # line it wins with, and its Psychic energy. Everything else is fair game.
 CORE_MIN = {741: 4, 742: 3, 743: 3, 19: 4}
 ACE_SPEC = {1247}          # at most one ACE SPEC in a legal deck
+ANCHOR_FIELD = 0.6461      # v61_codex_safe's measured field rate == 726.1
 
 
 def load_pool():
@@ -94,8 +119,15 @@ def legal(deck, cards):
     for cid, n in CORE_MIN.items():
         if c.get(cid, 0) < n:
             return False
-    if not any(int(getattr(cards[cid], "cardType", -1)) == 0 and cards[cid].basic
-               for cid in c):
+    # One Basic is legal but unplayable: round 3 of the first field run
+    # proposed a deck that produced ZERO completed games, because a hand with
+    # no Basic is a mulligan and the engine never got a battle started. The
+    # base ships 7 Basics and the gate already flags that as a high mulligan
+    # rate, so treat 6 as the floor rather than 1.
+    basics = sum(n for cid, n in c.items()
+                 if int(getattr(cards[cid], "cardType", -1)) == 0
+                 and getattr(cards[cid], "basic", False))
+    if basics < 6:
         return False
     return True
 
@@ -151,7 +183,7 @@ def worker_dir(i):
 
 
 def _play(job):
-    widx, deck, n, seed0 = job
+    widx, deck, n, seed0, opp_dir = job
     d = worker_dir(widx)
     with open(os.path.join(d, "deck.csv"), "w", encoding="utf-8") as fh:
         fh.write("\n".join(map(str, deck)) + "\n")
@@ -192,7 +224,7 @@ def _play(job):
     # spent concluding that no deck helps.
     if sorted(da) != sorted(deck):
         return {"err_deck": 1, "w": 0, "l": 0}
-    fb, db = load(os.path.join(AGENTS, BASE))
+    fb, db = load(os.path.join(AGENTS, opp_dir))
 
     w = l = 0
     for g in range(n):
@@ -229,19 +261,33 @@ def _play(job):
 
 
 def evaluate(deck, games, workers, seed0):
-    per = max(1, games // workers)
-    jobs = [(i, deck, per, seed0 + i * 7919) for i in range(workers)]
+    """Weighted field win rate. Games are allocated to each archetype by share,
+    so the objective is the quantity that converts to a rating."""
+    live = [(o, sh) for o, sh in FIELD
+            if os.path.isdir(os.path.join(AGENTS, o))]
+    tot_share = sum(sh for _, sh in live)
+    jobs = []
+    plan = []
+    for wi, (opp, share) in enumerate(live):
+        k = max(1, int(round(games * share / tot_share)))
+        plan.append((opp, share, k))
+        jobs.append((wi % max(1, workers), deck, k,
+                     seed0 + wi * 7919, opp))
     w = l = bad = 0
-    with ProcessPoolExecutor(max_workers=workers) as ex:
-        for r in ex.map(_play, jobs):
+    num = den = 0.0
+    with ProcessPoolExecutor(max_workers=min(workers, len(jobs))) as ex:
+        for (opp, share, k), r in zip(plan, ex.map(_play, jobs)):
+            bad += r["err_deck"]
+            n_i = r["w"] + r["l"]
             w += r["w"]
             l += r["l"]
-            bad += r["err_deck"]
+            if n_i:
+                num += share * (r["w"] / n_i)
+                den += share
     if bad:
         raise SystemExit("candidate did not play the mutated deck -- deck.csv "
                          "resolution is wrong; fix before searching")
-    n = w + l
-    return (w / n if n else 0.0), n
+    return (num / den if den else -1.0), w + l
 
 
 def describe(deck, base, cards):
@@ -297,7 +343,12 @@ def main():
         scr, n1 = evaluate(cand, args.screen, args.workers,
                            2000 + st["round"] * 13)
         st["screened"] += 1
-        if scr <= 0.50:
+        if scr < 0.0:
+            print(f"r{st['round']:3d} UNPLAYABLE (0 games) | "
+                  f"{describe(cand, st['best'], cards)[:70]}")
+            json.dump(st, open(STATE, "w"))
+            continue
+        if scr <= ANCHOR_FIELD:
             print(f"r{st['round']:3d} screen {scr:.3f} ({n1})  reject   "
                   f"| {describe(cand, st['best'], cards)[:80]}")
             json.dump(st, open(STATE, "w"))
@@ -305,7 +356,7 @@ def main():
         conf, n2 = evaluate(cand, args.confirm, args.workers,
                             700000 + st["round"] * 977)
         pooled = (scr * n1 + conf * n2) / (n1 + n2)
-        ok = conf > 0.50 and pooled > 0.54
+        ok = conf > ANCHOR_FIELD and pooled > ANCHOR_FIELD + 0.02
         print(f"r{st['round']:3d} screen {scr:.3f} confirm {conf:.3f} "
               f"pooled {pooled:.3f}  {'ACCEPT' if ok else 'reject'} "
               f"| {describe(cand, st['best'], cards)[:80]}")
