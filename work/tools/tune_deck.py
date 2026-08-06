@@ -82,6 +82,12 @@ FIELD = [
 CORE_MIN = {741: 4, 742: 3, 743: 3, 19: 4}
 ACE_SPEC = {1247}          # at most one ACE SPEC in a legal deck
 ANCHOR_FIELD = 0.6461      # v61_codex_safe's measured field rate == 726.1
+# v61's measured rate against each archetype, so a targeted run has the right
+# bar to beat rather than 0.500.
+TARGET_BAR = {
+    "w1_alakazam": 0.934, "z_roman950": 0.818, "w5_grimmsnarl": 0.207,
+    "p3_crustle": 0.550, "w2_archaludon": 0.778, "s_dragapult": 0.449,
+}
 
 
 def load_pool():
@@ -260,19 +266,30 @@ def _play(job):
     return {"err_deck": 0, "w": w, "l": l}
 
 
-def evaluate(deck, games, workers, seed0):
+def evaluate(deck, games, workers, seed0, target=None):
     """Weighted field win rate. Games are allocated to each archetype by share,
     so the objective is the quantity that converts to a rating."""
-    live = [(o, sh) for o, sh in FIELD
-            if os.path.isdir(os.path.join(AGENTS, o))]
+    if target:
+        live = [(target, 1.0)]
+    else:
+        live = [(o, sh) for o, sh in FIELD
+                if os.path.isdir(os.path.join(AGENTS, o))]
     tot_share = sum(sh for _, sh in live)
     jobs = []
     plan = []
     for wi, (opp, share) in enumerate(live):
         k = max(1, int(round(games * share / tot_share)))
         plan.append((opp, share, k))
-        jobs.append((wi % max(1, workers), deck, k,
-                     seed0 + wi * 7919, opp))
+        if target:
+            # one opponent: split across ALL workers instead of one
+            per = max(1, k // max(1, workers))
+            for j in range(workers):
+                jobs.append((j, deck, per, seed0 + j * 7919, opp))
+                plan.append((opp, share, per))
+            plan.pop(0)
+        else:
+            jobs.append((wi % max(1, workers), deck, k,
+                         seed0 + wi * 7919, opp))
     w = l = bad = 0
     num = den = 0.0
     with ProcessPoolExecutor(max_workers=min(workers, len(jobs))) as ex:
@@ -308,6 +325,8 @@ def main():
     ap.add_argument("--workers", type=int, default=6)
     ap.add_argument("--seed", type=int, default=7)
     ap.add_argument("--report", action="store_true")
+    ap.add_argument("--target", default=None,
+                    help="optimise ONE opponent instead of the weighted field")
     args = ap.parse_args()
 
     pool, cards = load_pool()
@@ -333,6 +352,8 @@ def main():
         except Exception:
             pass
 
+    bar = TARGET_BAR.get(args.target, ANCHOR_FIELD) if args.target else ANCHOR_FIELD
+    print(f"objective: {args.target or 'weighted field'}; accept above {bar:.4f}")
     rng = random.Random(args.seed + st["round"])
     t0 = time.time()
     for _ in range(args.rounds):
@@ -341,22 +362,22 @@ def main():
         if sorted(cand) == sorted(st["best"]):
             continue
         scr, n1 = evaluate(cand, args.screen, args.workers,
-                           2000 + st["round"] * 13)
+                           2000 + st["round"] * 13, args.target)
         st["screened"] += 1
         if scr < 0.0:
             print(f"r{st['round']:3d} UNPLAYABLE (0 games) | "
                   f"{describe(cand, st['best'], cards)[:70]}")
             json.dump(st, open(STATE, "w"))
             continue
-        if scr <= ANCHOR_FIELD:
+        if scr <= bar:
             print(f"r{st['round']:3d} screen {scr:.3f} ({n1})  reject   "
                   f"| {describe(cand, st['best'], cards)[:80]}")
             json.dump(st, open(STATE, "w"))
             continue
         conf, n2 = evaluate(cand, args.confirm, args.workers,
-                            700000 + st["round"] * 977)
+                            700000 + st["round"] * 977, args.target)
         pooled = (scr * n1 + conf * n2) / (n1 + n2)
-        ok = conf > ANCHOR_FIELD and pooled > ANCHOR_FIELD + 0.02
+        ok = conf > bar and pooled > bar + 0.02
         print(f"r{st['round']:3d} screen {scr:.3f} confirm {conf:.3f} "
               f"pooled {pooled:.3f}  {'ACCEPT' if ok else 'reject'} "
               f"| {describe(cand, st['best'], cards)[:80]}")

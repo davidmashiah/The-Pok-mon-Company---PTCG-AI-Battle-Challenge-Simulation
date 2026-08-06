@@ -49,16 +49,33 @@ STORE = os.path.join(WORK, "out", "gauntlet.json")
 CAL = os.path.join(WORK, "out", "field_calibration.json")
 
 # Archetype -> (agent we have a real policy for, share of the field).
-# Shares come from loss_autopsy over our own replays; the archetypes we cannot
-# pilot are folded into the nearest one we can, and the whole vector is
-# renormalised, so this is the field WE CAN MEASURE, not the whole ladder.
+#
+# THESE ARE TOP-BAND SHARES, from work/tools/top_decks.py over the top 50 teams'
+# own replays. The first version of this table used shares from OUR replays at
+# ~726 rating and it was badly wrong for the question being asked. Compare:
+#
+#                      our band (726)   top 50      v61 win rate
+#   Grimmsnarl              0.20         0.30          0.207
+#   Mega Lopunny            0.00         0.20          (no opponent)
+#   Alakazam                0.23         0.16          0.934
+#   Mega Lucario            0.22         0.02          0.818
+#
+# Weighting Mega Lucario at 0.22 -- where v61 wins 0.818 -- when it is 2% of the
+# top field, and Grimmsnarl at 0.20 when it is 30%, flattered us by ~0.16 of
+# field win rate. You cannot measure your way to 1000 against the field of the
+# band you are already in.
+#
+# KNOWN GAP, stated rather than hidden: Mega Lopunny ex is 20% of the top 50 and
+# no Lopunny agent is published anywhere, so it is absent here. "unknown"
+# archetypes are a further 18%. The shares below are renormalised over what we
+# can actually pilot, so this measures 62% of the top field, not all of it.
 PANEL = [
-    ("Alakazam mirror",  "w1_alakazam",     0.23),
-    ("Mega Lucario",     "z_roman950",      0.22),
-    ("Grimmsnarl",       "w5_grimmsnarl",   0.20),
-    ("Crustle control",  "p3_crustle",      0.13),
-    ("Archaludon",       "w2_archaludon",   0.12),
-    ("Dragapult",        "s_dragapult",     0.10),
+    ("Grimmsnarl",       "w5_grimmsnarl",   0.30),
+    ("Alakazam",         "w1_alakazam",     0.16),
+    ("Crustle control",  "p3_crustle",      0.08),
+    ("Dragapult",        "s_dragapult",     0.06),
+    ("Mega Lucario",     "z_roman950",      0.02),
+    ("Archaludon",       "w2_archaludon",   0.02),
 ]
 
 ANCHOR_AGENT = "v61_codex_safe"
