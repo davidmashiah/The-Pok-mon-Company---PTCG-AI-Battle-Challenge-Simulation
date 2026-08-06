@@ -85,12 +85,23 @@ ENABLED = _i("PTCG_SEARCH_ON", 1)
 # other. 0 disables the gate (search every eligible decision).
 GATE = _f("PTCG_SEARCH_GATE", __GATE__)
 
-# A reference 60 for guessing the opponent's hidden cards. Marnie's Grimmsnarl
-# is 32% of the top 50 and is also our own list, so it is both the single most
-# likely opponent deck and exactly right in the mirror -- which is the matchup
-# carrying ~47% of the panel weight.
-_OPP_REF = None
+# Real 60-card lists read verbatim out of the top-50 teams' own replays. The
+# opponent's hidden cards are dealt from whichever of these best explains the
+# cards we have actually SEEN them play.
+#
+# This is the difference between a determinization and a fantasy. An earlier
+# build here determinized most of the field as a deck that could not exist --
+# the library had zero lists for archetypes it faced constantly -- and every
+# playout was a game against an opponent nobody plays. Guessing Grimmsnarl for
+# all of them is the same mistake in a politer form: it is right for 32% of the
+# field and wrong for the rest.
+try:
+    from opp_library import DECKS as _LIB
+except Exception:
+    _LIB = []
+_OPP_REF = None                    # our own 60, the fallback prior
 _BASIC_FOR_FACEDOWN = 646          # Marnie's Impidimp, a Basic
+_MIN_MATCH = 4                     # below this the evidence is too thin to act
 
 _RANK = {"order": None, "scores": None, "token": 0}
 _STATS = {
@@ -219,7 +230,73 @@ def _rollout(sid, o, me_idx):
     return _evaluate(o, me_idx), sid
 
 
-def _determinize(o, me_idx, my_deck):
+def _seen_opponent(o, opp_idx):
+    """Every opponent card we have actually observed, as a multiset."""
+    seen = []
+    try:
+        p = o.current.players[opp_idx]
+        for mon in _side(p):
+            seen.append(mon.id)
+            for c in (mon.energyCards or []):
+                seen.append(c.id)
+            for c in (mon.tools or []):
+                seen.append(c.id)
+            for c in (mon.preEvolution or []):
+                seen.append(c.id)
+        for c in (p.discard or []):
+            seen.append(c.id)
+    except Exception:
+        pass
+    return seen
+
+
+def _match_opponent(o, opp_idx, my_deck):
+    """Pick the real decklist that best explains what we have seen them play.
+
+    Multiset overlap, so a list is only credited for copies it could actually
+    supply. Below _MIN_MATCH observed cards we keep the Grimmsnarl prior rather
+    than committing to a guess -- on turn one every deck matches equally well
+    and a confident wrong answer is worse than a vague right one.
+    """
+    seen = _seen_opponent(o, opp_idx)
+    if not _LIB or len(seen) < _MIN_MATCH:
+        return list(_OPP_REF or my_deck)
+    want = {}
+    for c in seen:
+        want[c] = want.get(c, 0) + 1
+    best, best_score = None, 0
+    for deck in _LIB:
+        have = {}
+        for c in deck:
+            have[c] = have.get(c, 0) + 1
+        score = 0
+        for cid, n in want.items():
+            h = have.get(cid, 0)
+            score += n if h >= n else h
+        if score > best_score:
+            best, best_score = deck, score
+    if best is None or best_score < _MIN_MATCH:
+        return list(_OPP_REF or my_deck)
+    return list(best)
+
+
+def _opp_pool(o, me_idx, my_deck):
+    """The matched list MINUS everything we have already watched them play.
+
+    Built once per decision, not once per playout: the subtraction is O(seen x
+    deck) and doing it inside the playout loop cost 12-26 s/episode against
+    w30's 5 s for no extra information.
+    """
+    ref = _match_opponent(o, 1 - me_idx, my_deck)
+    for cid in _seen_opponent(o, 1 - me_idx):
+        try:
+            ref.remove(cid)
+        except ValueError:
+            pass
+    return ref
+
+
+def _determinize(o, me_idx, my_deck, opp_pool):
     me = o.current.players[me_idx]
     opp = o.current.players[1 - me_idx]
     mine = list(my_deck)
@@ -230,12 +307,13 @@ def _determinize(o, me_idx, my_deck):
     your_prize = mine[need_d:need_d + need_p]
     while len(your_prize) < need_p:            # deck+prize can exceed our 60
         your_prize.append(mine[0])             # only when the engine says so
-    ref = list(_OPP_REF or my_deck)
+
+    ref = list(opp_pool)
     random.shuffle(ref)
     od, op_, oh = int(opp.deckCount or 0), len(opp.prize or []), int(opp.handCount or 0)
     need = od + op_ + oh
     while len(ref) < need:
-        ref = ref + ref
+        ref = ref + (list(opp_pool) or list(my_deck))
     return (your_deck, your_prize, ref[:od], ref[od:od + op_],
             ref[od + op_:od + op_ + oh])
 
@@ -267,7 +345,7 @@ def _playout(o, me_idx, det, pick):
                 pass
 
 
-def _score_all(o, me_idx, my_deck, cands, dets, deadline):
+def _score_all(o, me_idx, my_deck, opp_pool, cands, dets, deadline):
     """PAIRED comparison: every candidate is judged on the SAME hidden-info
     samples, so the difference between two candidates is not contaminated by
     the difference between two shuffles.
@@ -286,7 +364,7 @@ def _score_all(o, me_idx, my_deck, cands, dets, deadline):
     for _ in range(dets):
         if time.time() > deadline:
             break
-        det = _determinize(o, me_idx, my_deck)
+        det = _determinize(o, me_idx, my_deck, opp_pool)
         vals = {}
         for c in cands:
             v = _playout(o, me_idx, det, [c])
@@ -351,7 +429,8 @@ def validate(obs_dict, chosen, my_deck):
     _STATS["eligible"] += 1
     me_idx = o.current.yourIndex
     deadline = t0 + BUDGET_S
-    scored, wins, n = _score_all(o, me_idx, my_deck, cands,
+    opp_pool = _opp_pool(o, me_idx, my_deck)
+    scored, wins, n = _score_all(o, me_idx, my_deck, opp_pool, cands,
                                  DETERMINIZATIONS, deadline)
     try:
         search_end()
@@ -437,6 +516,30 @@ def main():
     if os.path.isdir(dst):
         shutil.rmtree(dst)
     shutil.copytree(src, dst, ignore=shutil.ignore_patterns("__pycache__"))
+
+    # Bundle the real opponent decklists read out of the top-50 teams' replays.
+    lib = []
+    try:
+        import json
+        store = json.load(open(os.path.join(WORK, "out", "top_decks.json"),
+                               encoding="utf-8"))
+        seen = set()
+        for team in store.values():
+            for deck in (team.get("decks") or []):
+                if deck and len(deck) == 60:
+                    key = tuple(sorted(deck))
+                    if key not in seen:
+                        seen.add(key)
+                        lib.append(list(key))
+    except Exception as exc:
+        print(f"  WARNING: no opponent library ({type(exc).__name__}); "
+              f"search will fall back to the Grimmsnarl prior")
+    with open(os.path.join(dst, "opp_library.py"), "w", encoding="utf-8") as f:
+        f.write('"""Real 60-card lists, read verbatim out of the setup frame of\n'
+                'the top-50 teams\' own replays by work/tools/top_decks.py.\n'
+                'Generated -- do not hand-edit."""\n')
+        f.write(f"DECKS = {lib!r}\n")
+    print(f"  + opp_library.py ({len(lib)} real top-50 decklists)")
 
     body = (VALIDATOR
             .replace("__BUDGET__", repr(a.budget))
