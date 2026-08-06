@@ -519,11 +519,20 @@ def main():
 
     print(f"== building '{args.agent}' ==")
     stage = tempfile.mkdtemp(prefix="ptcg_build_")
-    # 1. agent files
+    # 1. agent files. Bundles are not always flat: w5_grimmsnarl ships 187 files
+    # across experts/, policies/ and models/, and main.py imports from them, so
+    # a file-only copy both crashed on the directory and would have staged an
+    # agent that cannot import itself.
     for fn in os.listdir(agent_dir):
         if fn == "__pycache__":
             continue
-        shutil.copy2(os.path.join(agent_dir, fn), os.path.join(stage, fn))
+        src_p = os.path.join(agent_dir, fn)
+        dst_p = os.path.join(stage, fn)
+        if os.path.isdir(src_p):
+            shutil.copytree(src_p, dst_p,
+                            ignore=shutil.ignore_patterns("__pycache__"))
+        else:
+            shutil.copy2(src_p, dst_p)
     # 2. shared libs + engine
     # meta_decks.py was missing from every earlier bundle. fsearch imports it
     # inside a bare try/except, so its absence silently disabled opponent-deck

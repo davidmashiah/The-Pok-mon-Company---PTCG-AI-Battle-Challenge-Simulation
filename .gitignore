@@ -29,3 +29,7 @@ __pycache__/
 
 # per-worker scratch bundles written by tune_weights.py
 work/agents/_tune_w*/
+
+# per-worker scratch bundles written by the searchers
+work/agents/_deck_w*/
+work/agents/_coal_w*/
