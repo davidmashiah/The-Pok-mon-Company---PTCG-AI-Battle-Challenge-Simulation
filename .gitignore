@@ -41,3 +41,16 @@ work/agents/w9_fastsetup*/
 work/agents/_route_w*/
 work/agents/_probe_layers/
 work/agents/v200_decidueye/
+
+# Mined public notebooks + the bundles extracted from them. Both are
+# reproducible: mine_notebook.py regenerates every work/agents/w2*, and the
+# .ipynb files are other people's published work, not ours to redistribute.
+work/mined/
+work/agents/w20_luc1084/
+work/agents/w21_libout1208/
+work/agents/w23_peng915/
+work/agents/w24_tientrum/
+work/agents/w25_arist_imp/
+work/agents/w26_arist_prob/
+# build_search_layer.py regenerates this from w8_grimm_tuned.
+work/agents/w30_search/
