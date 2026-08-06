@@ -343,6 +343,32 @@ def build_attacks(src):
                  "branch on attacks")
 
 
+# --------------------------------------------------------------- deckguard
+# From an autopsy of v61's own 35 ladder replays: SIX games (17%) ended with our
+# deck at zero, four of them losses. In the sampled one we still held 3 prizes
+# to the opponent's 5 -- we were not losing the prize race, we ran ourselves out
+# of cards. Mean game length is 12.7 turns, and this deck starts with 47 cards
+# in the deck, so drawing it dry that fast is our own engine doing it:
+# Buddy-Buddy Poffin, Pokegear, Dudunsparce's draw-3, Fezandipiti's draw-3.
+#
+# The base is not naive about this -- it computes
+#     safe_draws = deck_count - my_prize_count - 1
+# and refuses draw abilities below 3 and draw cards below 2. The guard exists
+# and is simply too loose: at 3 prizes left it still fires Dudunsparce with a
+# 7-card deck, taking it to 4, and the turn-start draws finish the job.
+#
+# So widen the margin rather than touch each threshold, which keeps every
+# relative decision the author tuned and only shifts where "unsafe" begins.
+# `can_win_this_turn` still short-circuits to 999, so a lethal line is never
+# blocked by this.
+def build_deckguard(src, margin):
+    return patch(src,
+                 "    safe_draws = deck_count - my_prize_count - 1 if not can_win_this_turn else 999",
+                 f"    safe_draws = deck_count - my_prize_count - 1 - {margin} "
+                 f"if not can_win_this_turn else 999",
+                 "deck-out safety margin")
+
+
 # ----------------------------------------------------------------- playout
 # The base's search stops after the opponent's reply and hands the position to
 # `_leaf_eval`, a hand-written sum of prizes, HP and energy. Every search this
@@ -586,11 +612,14 @@ def main():
                              "budget_margin", "budget_attacks",
                              "budget_margin_attacks", "statefix",
                              "statefix_budget", "statefix_budget_attacks",
-                             "statefix_budget_playout", "budget_playout"])
+                             "statefix_budget_playout", "budget_playout",
+                             "deckguard", "deckguard_statefix",
+                             "deckguard_statefix_budget"])
     ap.add_argument("--margin", type=float, default=150.0)
     ap.add_argument("--playout-max-cand", type=int, default=5)
     ap.add_argument("--playout-min-plays", type=int, default=10)
     ap.add_argument("--playout-margin", type=float, default=0.08)
+    ap.add_argument("--deck-margin", type=int, default=3)
     ap.add_argument("--name", default=None)
     ap.add_argument("--n-det", type=int, default=24)
     ap.add_argument("--time-budget-s", type=float, default=6.0)
@@ -606,6 +635,8 @@ def main():
     src = build_safe(src)
     if "meta" in args.variant:
         src = build_meta(src)
+    if "deckguard" in args.variant:
+        src = build_deckguard(src, args.deck_margin)
     if "statefix" in args.variant:
         src = build_statefix(src)
     if "budget" in args.variant:

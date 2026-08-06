@@ -35,10 +35,17 @@ COMP = "pokemon-tcg-ai-battle"
 PACE = 1.2
 _last = [0.0]
 
-OUR_SUBS = ["55258637", "55262119"]   # the two v51_roman_safe draws
+# 55274352 is v61_codex_safe, the adopted base and current champion. The two
+# v51 draws are kept because the archetype mix we are matched into shifts with
+# our rating, and comparing the two rating bands is the point.
+OUR_SUBS = ["55274352", "55258637", "55262119"]
 
 # archetype signatures: a card that only that deck plays
 ARCHETYPES = [
+    (743, "Alakazam"),
+    (756, "Mega Kangaskhan ex"),
+    (58, "Great Tusk"),
+    (116, "Okidogi"),
     (648, "Marnie's Grimmsnarl ex"),
     (678, "Mega Lucario ex (ours)"),
     (723, "Mega Abomasnow ex"),
