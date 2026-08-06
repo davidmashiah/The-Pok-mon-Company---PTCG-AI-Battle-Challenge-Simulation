@@ -46,7 +46,17 @@ STORE = os.path.join(WORK, "out", "gauntlet.json")
 #           first game or two, and the 0.5375 it scored was mostly a measurement
 #           of the plain heuristic. Any agent with per-episode state -- budgets,
 #           ability counters, opponent belief -- was affected.
-HARNESS = 3
+# h3 -> h4  evict a bundle's modules from sys.modules after loading it. Same
+#           reason as the setup-frame fixes above: it changes what the second
+#           agent in a pair actually executes. For every pair already in the
+#           store the change is provably a no-op -- the same-named modules
+#           across the w5/w7/w8/_sub bundles are byte-identical, and the one
+#           file that differs, coalition_weights.json, is read by an expert
+#           that fired 0 times in 933 instrumented decisions. It is bumped
+#           anyway: the store must never pool two loading semantics, and
+#           "I checked, it's fine" is exactly the reasoning this constant
+#           exists to make unnecessary.
+HARNESS = 4
 
 
 # ------------------------------------------------------------------ helpers
@@ -167,6 +177,25 @@ def _worker(job):
                 pass
         finally:
             os.chdir(cwd)
+            # Evict every module this bundle imported, and drop its sys.path
+            # entry. Many bundles here ship modules with the SAME names --
+            # policy_features, strategic_policy, matchup_router, the guards --
+            # and `import policy_features` is a silent no-op once one of them
+            # is in sys.modules, so the second agent loaded would run the
+            # FIRST agent's code and, worse, its 60-card deck.
+            #
+            # This never bit before only by luck: every same-named module
+            # across the w5/w7/w8/_sub family is byte-identical (verified), so
+            # the sharing was a no-op. w40_cape is the first bundle whose
+            # policy_features really differs -- it holds a different decklist --
+            # and the collision surfaced as w5_grimmsnarl raising
+            # "fixed 60-card deck changed" and killing the whole run.
+            for _name, _mod in list(sys.modules.items()):
+                _f = getattr(_mod, "__file__", None) or ""
+                if _f.startswith(full + os.sep) or _f.startswith(full + "/"):
+                    del sys.modules[_name]
+            while full in sys.path:
+                sys.path.remove(full)
         fns = [v for v in env.values() if callable(v)]
         # Do NOT assume the decklist is a module global. Some public agents
         # (w2_archaludon) read deck.csv lazily inside agent() and expose no

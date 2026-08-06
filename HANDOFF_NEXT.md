@@ -121,8 +121,16 @@ live. Strength here is **not stationary**.
 | Dragapult ex | 2 (4%) | 0.06 |
 | Archaludon | **0** | 0.02 — **stale, no longer in the top 50** |
 
-**16 of the top 50 play the exact deck we play.** We are not on the wrong deck; we pilot the
-consensus deck ~170 points worse than teams running the identical 60 cards.
+**16 of the top 50 play the exact deck we play — and 13 of those 16 play the byte-identical 60.**
+`work/tools/mirror_diff.py` reads their real lists out of their own replays and diffs them against
+ours: rank 2 (1197.3), rank 4 (1156.3), rank 5 (1135.5), rank 10 (1124.4), rank 21, rank 26 …
+all *zero cards different*. The only deviation anywhere in the top 50 is 2× **Handheld Fan**
+(1161, not ACE SPEC), run by 3 of the 16 — it moves an Energy off their attacking Grimmsnarl each
+time it damages the holder.
+
+**So the deck is solved and shared, and the entire 853 → 1197 spread is piloting.** Do not spend
+another hour on decklists. Note also that the pilot we ship is a public bundle whose own author
+sits at **801.6** — we are running an ~800-rated pilot on the consensus deck.
 
 ---
 
@@ -139,8 +147,25 @@ Added 2026-08-06:
 |---|---|
 | **Adopting any published agent** | exhausted, §3. Nothing beats w8 |
 | **Deck tech on w8** | impossible, §2 |
-| **Determinized search-validation over w8** (`w30_search`) | **0.5381 vs Grimmsnarl (n=197)** against w8's 0.5297 — inside noise. Full field in `work/out/ft_w30.log` |
 | **Hero's Cape as a 3-of** | **illegal.** It is ACE SPEC and the format allows exactly ONE; `battle_start` returns `None` with no error. Our deck already spends the slot on Unfair Stamp |
+| **Hero's Cape as the 1 ACE SPEC** (`w40_cape`) | **REFUTED, and it is a regression.** Against a matched control at the same n, under the same harness: control `_sub_handwritten_v26` **0.5523** (n=239), `w40_cape` **0.4417** (n=240), CIs [0.489,0.614] vs [0.380,0.505]. +100 HP is worth less than Unfair Stamp's post-knockout refuel — which is why 13 of the 16 top-50 Grimmsnarl teams decline it |
+
+### The one thing that DID measure better: `w30_search`
+Field **0.6519 → projected 841**, against w8's 0.6376 → 830. Per cell:
+
+| | w8 | w30_search |
+|---|---|---|
+| Grimmsnarl | 0.530 | 0.538 |
+| Alakazam | 0.747 | **0.780** |
+| Crustle | 0.811 | **0.844** |
+| Dragapult | 0.720 | 0.661 |
+| **Mega Lucario** | 0.446 | **0.559** |
+| Archaludon | 0.629 | 0.634 |
+
+No single cell clears its own CI, but 5 of 6 moved up and the largest gain is on our worst
+matchup — which the re-survey shows is 6% of the top 50, not the 2% the panel assumes. **+11
+projected points is far inside the ladder's ±55–85 noise floor, so it cannot be confirmed live.**
+Treat it as "not a regression, probably a small gain", never as a result.
 
 ### The v57 discovery — it invalidates an old ledger entry
 `v57_pimc_full`'s playout search **never executed a single playout**. `_SEARCH_OK` is set from
