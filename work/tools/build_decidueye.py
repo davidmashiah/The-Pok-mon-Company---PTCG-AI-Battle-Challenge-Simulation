@@ -129,6 +129,10 @@ def _card(obs, area, index, player_index):
     return None
 
 
+def _bench_deci_unarmed(bench):
+    return any(b.id == DECIDUEYE and len(b.energies or []) == 0 for b in bench)
+
+
 def _score(obs, opt):
     st, sel = obs.current, obs.select
     me = st.players[st.yourIndex]
@@ -196,6 +200,10 @@ def _score(obs, opt):
             return 26000 if len(hand) <= 3 else 5000
         if cid == SWITCH:
             if active is not None and not active_is_deci and any(
+                    b.id == DECIDUEYE and len(b.energies or []) >= 1
+                    for b in bench):
+                return 97000     # an armed attacker on the bench wins nothing
+            if active is not None and not active_is_deci and any(
                     b.id == DECIDUEYE for b in bench):
                 return 45000
             return 2000
@@ -215,14 +223,24 @@ def _score(obs, opt):
             # the hand copy is the ammunition for the discard cost
             if active_is_deci and active_energy == 0:
                 return 96000    # nothing matters more than arming Power Shot
+            # Pre-arm a BENCHED Decidueye. Our attacker has 150 HP and dies to
+            # one Shadow Bullet, so the replacement has to be ready the turn it
+            # is promoted -- otherwise every knockout costs us a full turn and
+            # Power Shot fires half as often as it should.
+            if opt.area == AreaType.BENCH or _bench_deci_unarmed(bench):
+                return 62000
             if active_energy == 0:
-                return 46000    # arm whoever is up; we may evolve into it
+                return 46000
             return 900
         return 800
 
     if t == OptionType.ABILITY:
         return 25000
     if t == OptionType.RETREAT:
+        if active is not None and not active_is_deci and any(
+                b.id == DECIDUEYE and len(b.energies or []) >= 1
+                for b in bench):
+            return 91000
         if active is not None and not active_is_deci and any(
                 b.id == DECIDUEYE for b in bench):
             return 44000
@@ -257,12 +275,14 @@ def _line_pref(obs, opt):
         c = _card(obs, opt.area, opt.index, obs.current.yourIndex)
         cid = getattr(c, "id", None)
         if cid == DECIDUEYE:
+            return 6
+        if cid == RARE_CANDY:
             return 5
-        if cid == DARTRIX:
-            return 4
         if cid == ROWLET:
-            return 3
+            return 4
         if cid == GRASS:
+            return 3
+        if cid == DARTRIX:
             return 2
     except Exception:
         pass

@@ -1,0 +1,8 @@
+{
+ "mirror": "mirror",
+ "grass": "tempo",
+ "wall": "mirror",
+ "arch": "baseline",
+ "psychic": "baseline",
+ "unknown": "mirror"
+}
