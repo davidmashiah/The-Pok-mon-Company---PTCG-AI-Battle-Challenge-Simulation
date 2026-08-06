@@ -1,270 +1,181 @@
 # HANDOFF — PTCG AI Battle Challenge
 
 **Competition:** `pokemon-tcg-ai-battle` (Kaggle simulation ladder). Ladder deadline **2026-08-16**.
-**State as of 2026-08-06 20:31 UTC.** This file is self-contained; you do not need the chat log.
+**State as of 2026-08-06 22:30 UTC.** Self-contained; you do not need the chat log.
 
 ---
 
-## 0. WHERE WE ARE RIGHT NOW
+## 0. WHERE WE ARE
 
 | | |
 |---|---|
-| **Live score** | **~849** (the higher of our two active draws) |
-| Session start | 697.7 |
-| Active sub A | `55299973` — `w8_grimm_tuned`, **848.8** |
-| Active sub B | `55305926` — same bundle, byte-identical second draw, **843.5** |
-| Slots | **2 of 5 used today** (UTC); resets 00:00 UTC |
-| Top 50 cutoff | **1040.1**. Leader 1208.2. LB is 6321 teams, median 632.6 |
+| **Live score** | **880.9** (max of the two active draws) |
+| Active A | `55299973` — `w8_grimm_tuned`, **880.9** |
+| Active B | `55305926` — **byte-identical** to A, **825.3** |
+| Slots | 2 of 5 used (UTC day resets 00:00) |
+| Top-50 cutoff | **1043.6**. Leader 1188.9. 6466 teams, median 631.5 |
 
-**The user's goal is top 50 (1040+). We are not there and the arithmetic in §5 says this base
-cannot get there.** Read §5 before promising anything.
+The two active submissions are the same bytes and read **55.6 points apart**, so this agent's
+true value is roughly **853 ± 28**, not 880.9. Never quote the lucky twin.
 
 **STANDING RULE: never submit without explicit approval.** The user calls every submission.
 
 ---
 
-## 1. THE MEASUREMENT INSTRUMENT — READ THIS FIRST
+## 1. THE MEASUREMENT INSTRUMENT — READ FIRST
 
-Everything in this repo has failed at measurement before it failed at ideas. Three rules, all
-paid for:
+`work/tools/field_test.py` measures a weighted win rate across the archetypes the **top 50**
+actually play, then converts to a rating through an anchor. It now has **three** calibration
+points, one fully out-of-sample:
 
-### 1a. Head-to-head does NOT convert to ladder points
-`v61` beat `v51` **0.8333 over 240 games** and gained about **+30** on the ladder. An Elo reading
-of 0.83 predicts +300. The head-to-head was enormous because Alakazam beats Mega Lucario — a
-**matchup**, and the ladder does not pay for matchups. Do not judge a candidate by a head-to-head.
-
-### 1b. Use `field_test.py` — it is calibrated and it works
-`work/tools/field_test.py` measures the weighted win rate across the archetypes the **top 50**
-actually play, then converts to a rating through an anchor measured on our own submission.
+| agent | field | predicted | actual live | error |
+|---|---|---|---|---|
+| `v61_codex_safe` | 0.4914 | 726.1 (anchor) | 726.1 | — |
+| **`w5_grimmsnarl`** (tetsutani's public bundle, we own nothing in it) | **0.6030** | **805** | **801.6** | **+3.4** |
+| `w8_grimm_tuned` | 0.6376 | 830 | 853 (mean of twins) | −23 |
 
 ```bash
 python work/tools/field_test.py --agent <name> --games 190 --workers 6
 ```
 
-It has predicted two live scores correctly:
+Trust it in the 700–900 band. The extrapolation to 1040 is **beyond its validated range**.
 
-| agent | field | projected | actual live |
-|---|---|---|---|
-| `v61_codex_safe` | 0.4914 | 726 | **726.1** |
-| `w8_grimm_tuned` | 0.6376 | 830 | **829.5 → 848.8** |
+### 1a. Screen with the Grimmsnarl cap before spending a full field test
+`work/tools/grimm_cap.py`. Grimmsnarl carries ~47% of the renormalised panel weight, so its cell
+bounds everything: `field ≤ w_g·p_grimm + (1−w_g)·1.0`. Spot a candidate a perfect 1.000
+everywhere else; if it still cannot beat 0.6376, it is dead. One pair instead of six.
 
-Anchor is stored in `work/out/field_calibration.json`. **Do not re-anchor it on a different
-agent without re-deriving the whole table.**
+### 1b. Size the lever before building it
+`work/tools/what_is_it_worth.py`. Rating moves with the **logit** of the field rate, and at 0.64
+that curve is flat:
 
-Panel and weights (top-50 shares, from `work/tools/top_decks.py` over 50 teams' own replays):
-
-| archetype | share | opponent agent |
+| change | field | rating |
 |---|---|---|
-| Grimmsnarl | 0.30 | `w5_grimmsnarl` |
-| Alakazam | 0.16 | `w1_alakazam` |
-| Crustle | 0.08 | `p3_crustle` |
-| Dragapult | 0.06 | `s_dragapult` |
-| Mega Lucario | 0.02 | `z_roman950` |
-| Archaludon | 0.02 | `w2_archaludon` |
+| **every** non-mirror matchup → 0.95, mirror unchanged | 0.753 | **926** |
+| mirror alone → 0.95 | 0.835 | **1013** |
+| mirror 0.530 → 0.580 | 0.661 | **+18** |
 
-**Known gap, stated not hidden:** Mega Lopunny is **20%** of the top 50 and no Lopunny agent is
-published anywhere (checked 4 pages by vote count). "unknown" archetypes are another 18%. So the
-panel covers **62%** of the top field and shares are renormalised over that. The 400-point Elo
-slope is a convention, not this ladder's measured slope.
-
-### 1c. A tuning search CANNOT certify its own result
-Three searches produced "gains" that **all vanished** when measured on an independent code path:
-
-| search | its own number | independent `field_test` |
-|---|---|---|
-| coalition run 1 | 0.7147 → 873 | **0.6376 → 830** |
-| coalition run 2 | 0.6920 → 873 | **0.6114 → 811** |
-| router | 0.6665 → 852 | **0.6228 → 819** |
-
-Screen-plus-confirm on self-selected seeds is not enough at this noise level. **Always re-measure
-a search result with `field_test.py` before believing it, and never submit on a searcher's own
-number.**
+**Winning every other matchup 95% of the time does not reach the cutoff.** Reaching ~1040 needs
+roughly mirror 0.67 **and** ~0.95 against everything else, simultaneously. That is a different
+agent, not a tweak.
 
 ### Other non-negotiables
-- **n≥200 for any head-to-head you act on.** 60-game readings have produced three separate ghosts.
-- **≤6 python workers total** (8 cores). `pkill -f` does NOT work here — use PowerShell
-  `Stop-Process`, verify with `Get-CimInstance Win32_Process -Filter "Name='python.exe'"`.
-- **Ladder noise floor is real and measured on our own bundles**: the two active submissions are
-  byte-identical and read **848.8 vs 843.5**, and earlier in the day were **856.5 vs 771.9** — an
-  85-point spread. A submission means nothing under ~25 episodes.
+- **n≥200 for any head-to-head you act on.**
+- **≤6 python workers** (8 cores). `pkill -f` does not work; use PowerShell `Stop-Process` and
+  verify with `Get-CimInstance Win32_Process -Filter "Name='python.exe'"`.
+- A tuning search **cannot certify its own result** — re-measure with `field_test.py`.
+- **Two agents in one process collide.** Several bundles ship a module named `policy_features`;
+  the second `import` is a silent no-op and binds the FIRST agent's 60-card deck. Evict
+  `sys.modules` entries whose `__file__` is under the agent dir between loads (see
+  `work/tools/cape_check.py`). Caught when `w5_grimmsnarl` raised "fixed 60-card deck changed".
 
 ---
 
 ## 2. THE AGENT WE SHIP
 
-**`w8_grimm_tuned`** — tetsutani's published Grimmsnarl coalition agent + two changes of ours.
-Gate: **27/27 PASSED**. `work/out/w8_grimm_tuned.tar.gz` is the submitted artefact.
+**`w8_grimm_tuned`** — tetsutani's published Grimmsnarl coalition agent + a bundle-path fix.
+Gate 27/27. Artefact `work/out/w8_grimm_tuned.tar.gz`.
 
-Lineage, all reproducible:
-```
-w5_grimmsnarl     tetsutani's published bundle, unpacked from the notebook's base64 asset
-  -> w7_grimm_safe   + bundle-path fix   (work/tools/build_grimm_safe.py)
-  -> w8_grimm_tuned  + coalition weights (see §4 — this part turned out to be a no-op)
-```
-
-`build_grimm_safe.py` fixes a real submission-killer: the bundle resolved assets as
-`__file__` → `/kaggle_simulations/agent` → **cwd**, and since the harness `exec()`s main.py the
-first is undefined, so from any other directory import died on `models/feature_schema.pkl.gz`.
-Fixed by *finding* the bundle via `sys.path`. Kaggle's absolute path stays first so ladder play is
-bit-for-bit the author's.
+**It cannot be re-decked, at all.** Three independent locks: `main.py` asserts a fixed 60; the
+learned policy scores options through a **closed 180-entry intent vocabulary** keyed to card ids,
+so a card outside the deck has no representation; and the feature schema is built over `DECK_IDS`.
+Any deck idea needs a different base.
 
 ---
 
-## 3. HOW WE GOT FROM 697 TO 849 (so you don't re-derive it)
+## 3. MINING PUBLIC CODE IS NOW EXHAUSTED (measured, not assumed)
 
-The only thing that has ever moved this score is **adopting a published agent from a
-higher-ranked author**, twice. Method:
+The only lever that ever moved this score was adopting a published agent from a higher-ranked
+author. On 2026-08-06 the seam was worked to the end: **all 100 notebooks, four sort orders,
+every author joined to the live leaderboard** (`work/tools/mine_notebook.py`, and the join recipe
+in §7). Three authors nobody had mined were found — ranks **11, 88, 97**. All extracted, all
+measured:
 
-```bash
-TOKEN="$(cat ~/.kaggle/access_token)"
-curl -s -H "Authorization: Bearer $TOKEN" \
-  "https://www.kaggle.com/api/v1/kernels/list?competition=pokemon-tcg-ai-battle&sortBy=dateCreated&pageSize=60"
-curl -s -H "Authorization: Bearer $TOKEN" \
-  "https://www.kaggle.com/api/v1/competitions/pokemon-tcg-ai-battle/leaderboard/download" -o lb.zip
-# join on TeamMemberUserNames -> rank. leaderboard/view returns only the top 20.
-```
-Rank the **author**, not the notebook — the 85-vote notebook is rank 530, the 43-vote one rank 121.
+| candidate | vs Grimmsnarl | field | projected |
+|---|---|---|---|
+| **w8_grimm_tuned (ours)** | **0.5297** | **0.6376** | **830** |
+| w26_arist_prob (rank-97 author) | 0.4762 | 0.5009 | 733 |
+| w20_luc1084 ("1084.5 Baseline") | 0.4381 | 0.4816 | 719 |
+| w24_tientrum (rank-88, genuinely 1034.6 live on Jul 5) | 0.2525 | — | capped at 0.638 |
+| w21_libout1208 ("Max Elo 1208") | 0.176 | — | rejected on the cap |
 
-**This is now exhausted.** Every public agent has been extracted and field-tested:
+**Notebook titles are marketing.** "1084.5 Baseline" is by an author at rank 1632; "Max Elo 1208"
+rank 4074; "1000 Fixed Agent" rank 5447. Only the author-rank join is real.
 
-| agent | field | projected |
+**The tientrum result is the important one.** That build honestly scored 1034.6 — and is now
+capped at exactly our current 0.638, because Grimmsnarl grew into 32% of the top 50 after it was
+live. Strength here is **not stationary**.
+
+---
+
+## 4. WHAT THE TOP 50 ACTUALLY PLAY (re-measured 2026-08-06)
+
+| archetype | teams | panel weight |
 |---|---|---|
-| **w8_grimm_tuned (ours, live)** | **0.6376** | **830** |
-| `_sub_handwritten_v26` (a w8 sub-policy alone) | 0.6329 | 827 |
-| `w12_routed` | 0.6228 | 819 |
-| `w10_coal2` | 0.6114 | 811 |
-| `w7_grimm_safe` | 0.6030 | 805 |
-| `w9_fastsetup3` | 0.5969 | 800 |
-| `v61_codex_safe` (jazivxt Alakazam) | 0.4914 | 726 |
-| `s_mega` | 0.4503 | 697 |
-| `w6_kangaskhan` | 0.1604 | 334 |
+| **Marnie's Grimmsnarl ex** | **16 (32%)** | 0.30 ✓ |
+| Mega Lopunny ex | 9 (18%) | — no agent published anywhere |
+| unknown | 8 (16%) | — |
+| Alakazam | 7 (14%) | 0.16 ✓ |
+| Crustle | 5 (10%) | 0.08 ✓ |
+| Mega Lucario ex | 3 (6%) | 0.02 — **understated**, and our worst matchup (0.446) |
+| Dragapult ex | 2 (4%) | 0.06 |
+| Archaludon | **0** | 0.02 — **stale, no longer in the top 50** |
 
-No top-20 team publishes anything. jazivxt (rank 121) publishes builds **older than what they
-run** — their live 960.8 submission plays a Crustle deck matching neither of their notebooks
-(verified by reading the decklist out of their own replay).
+**16 of the top 50 play the exact deck we play.** We are not on the wrong deck; we pilot the
+consensus deck ~170 points worse than teams running the identical 60 cards.
 
 ---
 
-## 4. REFUTED — DO NOT REDO ANY OF THESE
+## 5. REFUTED — DO NOT REDO
 
-Every entry measured at n≥240 unless noted. Re-running them wastes days.
+Everything in the previous handoff's ledger still stands (coalition weights are a dead knob —
+`coalition_expert` fired **0** times in 933 instrumented decisions; router table search; setup
+speed; 4× determinizations; behavioural cloning 389.3; learned value nets ×3; deck/policy transfer
+`p4_crustle_live` 0.1167; both published Grass agents lose to Grimmsnarl at 0.100 and 0.160).
 
-### On the current Grimmsnarl base
+Added 2026-08-06:
+
 | idea | result |
 |---|---|
-| **Coalition weight tuning** (`coalition_weights.json`) | **The coalition NEVER FIRES.** Instrumented over 933 live decisions vs Grimmsnarl: `matchup_router` 351 overrides, residual/tactical/development 1 each, advisor 0, **coalition_expert 0**. It is gated behind `profile == "grass_fast" and confidence >= 0.45`. Hours were spent tuning a dead knob |
-| **Router table search** (which expert per archetype) | 0.6228 independent vs 0.6376 base. `work/tools/tune_router.py` works correctly; the shipped routing is already good |
-| **Setup speed** (`w9_fastsetup`) | 0.5969. The "attacks by turn 4 → 2-0, turn 5+ → 1-7" split from live games is **CONFOUNDED** — attacking early indicates a good *draw* (Impidimp + Rare Candy + energy), not a better policy. Forcing it changes a symptom |
-| Coalition-worse-than-its-members | A 60-game sample said 5 of 6 sub-policies beat the ensemble. At n=1116: 0.6329 vs 0.6376, a tie |
+| **Adopting any published agent** | exhausted, §3. Nothing beats w8 |
+| **Deck tech on w8** | impossible, §2 |
+| **Determinized search-validation over w8** (`w30_search`) | **0.5381 vs Grimmsnarl (n=197)** against w8's 0.5297 — inside noise. Full field in `work/out/ft_w30.log` |
+| **Hero's Cape as a 3-of** | **illegal.** It is ACE SPEC and the format allows exactly ONE; `battle_start` returns `None` with no error. Our deck already spends the slot on Unfair Stamp |
 
-### On the previous Alakazam base (`v61`)
-4× determinizations 0.5375 · live-state fix 0.5208 · terminal playouts 0.4625 · real opponent
-decklists 0.4542 · deck-out margin 2 → 0.5333 / margin 4 → 0.4625 · **all of them stacked → 0.4467**
-(the stack test is what proved the individual readings were noise).
+### The v57 discovery — it invalidates an old ledger entry
+`v57_pimc_full`'s playout search **never executed a single playout**. `_SEARCH_OK` is set from
+whether the *import* succeeds; the call `search_begin(obs, your_deck=yd)` then raises `TypeError`
+(this engine's signature takes seven required positional args) straight into
+`except Exception: return None`. It played its entire 701.8-point ladder run as a pure heuristic.
+Verified by signature (`work/tools/search_probe.py`) and by its own exception path. **So the
+"playout search refuted" entry never tested playout search.** Fifth silently-broken component here.
 
-### Deck / archetype
-| idea | result |
-|---|---|
-| **Grass type-counter** | Grimmsnarl IS weak to Grass (verified, weakness=1), but both published Grass agents lose to it: `g1_venusaur` **0.100**, `g2_leafeon` **0.160**. Type advantage does not survive a weak pilot — which is why zero of the top 50 play Grass |
-| **Their live decklist on the published policy** (`p4_crustle_live`) | **0.1167** (28-212). Sharpest deck/policy-coupling result in the repo: a deck is not transferable without the policy it was tuned with |
-| Enriching Energy | **Not legal in this format** — the engine rejects the deck outright. 46 of 49 policy-named cards are legal; see `work/out/pool_legality.json` |
-
-### Historical (previous sessions, still valid)
-Behavioural cloning 389.3 · learned action-scorer 400.1 · 1-ply hand-written eval 0.3500 ·
-2-ply PIMC 0.0530 · value-net leaf 0.3667 · damage-model correctness fixes: per-attack error
-11.8%→4.2%, phantoms → 0, and **no win-rate gain** (0.4770) · policy-weight and deck hill-climbing
-on the old base found nothing over ~50 confirmed rounds.
+The native search is fast and healthy: **2225 decisions/s**, ~0.45 ms/step, and `w30_search` runs
+~110 playouts/game in ~5 s/episode against a 600 s allowance.
 
 ---
 
-## 5. WHY THIS BASE CANNOT REACH 1040 — THE ARITHMETIC
+## 6. THE HONEST ARITHMETIC ON 1040
 
-Every agent in the repo measured against `w5_grimmsnarl`:
+Live ~853. Cutoff 1043.6. That gap needs field 0.6376 → ~0.82–0.855, i.e. **mirror ~0.67 AND
+~0.95 against everything else**. Per §1b, no single matchup gets there, and incremental pilot work
+is worth ~+18 points per +0.05 of mirror win rate.
 
-```
-w8_grimm_tuned (ours)   0.530   <- the best anti-Grimmsnarl agent that exists, anywhere
-_sub_handwritten_v26    0.527
-s_mega                  0.467
-z_roman950              0.425
-w1_alakazam             0.308
-p3_crustle              0.208
-v61_codex_safe          0.207
-g2_leafeon              0.160
-g1_venusaur             0.100
-```
+Three independent routes were tried today and all closed: adopt a better agent (exhausted),
+change the deck (impossible on this base, one ACE SPEC slot on the other), improve the pilot with
+search (inside noise). **Say this plainly to the user rather than promising a number.**
 
-Grimmsnarl is **30% of the top-50 field** and 0.530 is the ceiling of the response. So:
-
-```
-field = 0.30 x 0.530  +  0.70 x (everything else)
-        rest 0.72 today   -> 0.638 -> 830   (measured, live-confirmed)
-        rest 0.85         -> 0.754 -> 927
-        rest 0.92         -> 0.798 -> 1000
-```
-
-**1040 requires ~0.92 against every non-Grimmsnarl archetype** while holding the mirror. We are at
-0.72 there (Crustle 0.811, Alakazam 0.747, Dragapult 0.720, Archaludon 0.629, Lucario 0.446).
-Tuning has been exhausted. The only structural way past this is a deck that **beats** Grimmsnarl
-rather than coin-flipping it.
-
----
-
-## 6. THE ONE LIVE LEAD: DECIDUEYE
-
-**Proven in-engine, not theorised:**
-
-```
-Marnie's Grimmsnarl ex   320 HP, 2 prizes, Shadow Bullet 180 for 2 energy, weak to Grass
-Decidueye (id 129)       150 HP, 1 PRIZE,  Power Shot   170 for 1 energy
-                         cost: discard a Basic {G} Energy from hand
-                         second attack: Stock Up on Feathers, free, draw until you hold 7
-```
-
-170 × 2 weakness = **340 ≥ 320**. Confirmed in a real game log:
-`t9 US ATTACK Decidueye Power Shot base=170` → `t9 OPP DAMAGE Marnie's Grimmsnarl -340`.
-
-A one-prize Pokemon one-shotting their two-prize attacker for one energy: **they need six
-knockouts, we need three.** That is the only structure found that beats the 30% slice.
-
-### Status: built, does not work yet
-`work/tools/build_decidueye.py` → `work/agents/v200_decidueye`. Deck is legal (engine accepts it),
-60 cards, 9 Basics, 15 Grass energy. **Win rate 0.017.**
-
-Diagnosed with `work/tools/power_shot_rate.py` (Power Shots per game is the metric — win rate
-cannot steer this build):
-
-```
-Power Shot             0.50 /game     <- needs ~2.5-3
-Stock Up on Feathers   0.77 /game
-prizes taken           0.65 /game
-
-assembly chain over 20 games:
-  Rowlet in play        17/20
-  Rare Candy drawn      13/20
-  DECIDUEYE in play     12/20
-  Decidueye ACTIVE       1.50 turns/game
-    ...armed (>=1E)      0.70/game
-    ...and Grass in hand 0.80/game
-```
-
-**The bottleneck is Stage-2 consistency**, not the attacker. Three turns to build a 150 HP body
-that dies to one Shadow Bullet, and no armed replacement ready when it dies.
-
-Two policy bugs already found and fixed in it (both in `build_decidueye.py`, keep them):
-1. Attacks scored above EVOLVE, so it swung Rowlet's 0-damage "Add On" for five turns —
-   **attacking ends the turn**, so an attack must be either the play that takes a prize or the
-   last action of a turn.
-2. `AreaType.HAND` hardcoded in the ATTACH card lookup instead of `opt.area`, so energy never
-   attached and Power Shot could never fire.
-
-### What to try next on it
-- More consistency, not more attackers: the deck already has 4 Poffin / 4 Ultra Ball / 4 Pokégear
-  / 4 Bug Catching Set / 4 Lillie's. Verify the POLICY actually plays them (count card plays the
-  way `power_shot_rate.py` counts attacks) before adding more.
-- Iterate against **`power_shot_rate.py`**, not win rate. Target ≥2.5 Power Shots/game, then
-  `field_test.py`. Win rate at n=60 cannot see progress here.
-- Only 4 Decidueye exist in the deck and each survives ~1 turn; check whether that alone caps the
-  attack count before blaming the engine.
+What is genuinely still open, in descending expected value:
+1. **The Strategy competition** (§8) — $240,000, deadline **2026-09-13**, explicitly rewards
+   mid-tier ladder teams with deep analysis. Our evidence there is unusually strong.
+2. **Draw variance.** Identical bundles read 55–85 points apart. The LB takes the max of two
+   active submissions and each new one evicts the *older*. Re-rolling the weaker slot while
+   holding the good one is legitimate and could plausibly hold ~900–950. It is not a path to 1040.
+3. A genuinely new agent, if someone has ~2 weeks. The Basic-only **Iron Leaves ex + Teal Mask
+   Ogerpon ex** package (all Basics, 180 for [GGC] → 360 vs Grimmsnarl's Grass weakness,
+   `Rapid Vernier` switches it in from the bench and consolidates energy onto it) is the best
+   structure found — it avoids the Stage-2 assembly problem that killed `v200_decidueye` (0.017)
+   and both published Grass agents. `work/tools/answer_pool.py` has the full survey.
 
 ---
 
@@ -272,100 +183,60 @@ Two policy bugs already found and fixed in it (both in `build_decidueye.py`, kee
 
 | tool | what it does |
 |---|---|
-| `field_test.py` | **The yardstick.** Weighted top-band field win rate → projected rating. Calibrated, predicts live scores |
-| `build_and_gate.py` | 27 pre-submission checks + tarball. **Never skip.** Handles nested bundles now |
-| `gauntlet.py` | accumulating, content-hashed head-to-head. `HARNESS` constant is in the hash — bump it if you change how agents are driven |
-| `game_review.py` | per-game post-mortem of a live submission: opponent decklist from their setup frame, rating, how the game ended |
-| `top_decks.py` | what the top N teams actually play, read from their replays |
-| `power_shot_rate.py` | attacks-per-game diagnostic for the Decidueye build |
-| `setup_speed.py` | turn of our first attack, one number per game |
-| `agent_drift.py` | does an agent slow down as its process lives? Catches engine search-state leaks |
-| `tune_coalition.py` / `tune_router.py` / `tune_deck.py` / `tune_weights.py` | searchers. **All must be validated by `field_test.py`** — see §1c |
-| `build_grimm_safe.py`, `build_decidueye.py`, `build_codex_variants.py` | reproducible agent builders; every patch asserts its anchor was found |
-| `loss_autopsy.py` | downloads our ladder replays, reports the meta we actually face |
+| `field_test.py` | **The yardstick.** Calibrated at three points, one out-of-sample |
+| `grimm_cap.py` | Rejects a candidate from ONE pair using the weighted-field bound |
+| `what_is_it_worth.py` | Rating value of any matchup improvement, before you build it |
+| `mine_notebook.py` | .ipynb → runnable `work/agents/<name>/`. Handles `%%writefile`, DECK literals, base64 tar/zip |
+| `search_probe.py` | Ground truth on the native search API — signature, speed, return shape |
+| `build_search_layer.py` | w8 + determinized search-validation, paired determinizations, knobs baked in |
+| `search_liveness.py` | Proves the search executes (playouts, overrides, seconds/episode) |
+| `answer_pool.py` / `grass_pool.py` / `card_detail.py` | Whole-pool surveys: what answers a 320 HP Stage-2 ex, for how much energy |
+| `deck_report.py` | Resolves any deck.csv against our engine + asserts `battle_start` accepts it |
+| `cape_check.py` | In-engine verification of a Tool's effect; also the sys.modules eviction pattern |
+| `build_and_gate.py` | 27 pre-submission checks + tarball. **Never skip** |
+| `gauntlet.py` | Accumulating content-hashed head-to-head. Bump `HARNESS` if you change how agents are driven |
+| `top_decks.py` | What the top N teams actually play, read from their replays |
+| `field_calibration.json` | The anchor. Do not re-anchor without re-deriving the whole table |
 
----
-
-## 8. GOTCHAS THAT COST REAL TIME
-
-1. **`__file__` is undefined** — the harness `exec()`s `main.py`. Guarded use is fine.
-2. **The last callable in the module dict wins**, by dict POSITION, whatever it is named. Do not
-   require it to be called `agent` — the gate used to and it rejected a rank-121 author's bundle.
-3. **THE SETUP FRAME** (`select is None`) is part of the contract: the agent returns its 60 card
-   ids there, and agents initialise per-episode state in it. Both harnesses now issue it **once
-   per game**. Getting this wrong measured a crippled agent for a whole session.
-4. **`from X import Y` is a no-op if X is already in `sys.modules`** — a searcher that rewrites a
-   bundle's config file must evict every module loaded from an agent directory before re-loading,
-   and must **assert the config actually bound** before counting a game. This silently invalidated
-   an entire router search until caught.
-5. **Assets must resolve from the bundle, never the cwd.** Three separate agents in this repo have
-   shipped broken because of it.
-6. **Give every parallel worker its own agent directory** — searchers write config into the bundle.
-7. **The kaggle MCP server caches credentials at startup** and returns `Unauthenticated`. Use the
-   CLI or REST with `Authorization: Bearer $(cat ~/.kaggle/access_token)`.
-8. **`export PYTHONIOENCODING=utf-8`** — the é in the repo path crashes the CLI otherwise.
-9. Replay logs **repeat verbatim across frames**; dedupe by `(turn, serial, type, cardId, value)`
-   or you will double-count every event.
-
----
-
-## 9. SUBMISSION MECHANICS
-
-- **5/day**, resets 00:00 UTC. **Only the latest 2 stay active**, and the leaderboard score is
-  the **max of the two**.
-- **Each submission evicts the OLDER active.** This is a ratchet: if your good draw is the older
-  one, a new submission kills it. Do not submit twice in a row while holding a good score.
-- Draw variance is a real, legitimate lever — byte-identical bundles have read 85 points apart —
-  but the ratchet means you cannot farm it freely.
-
+Mining recipe (REST; the kaggle MCP server caches creds at startup and returns `Unauthenticated`):
 ```bash
-export KAGGLE_API_TOKEN="$(cat ~/.kaggle/access_token)"
-export PYTHONIOENCODING=utf-8
-python work/tools/build_and_gate.py --agent <name> --games 8      # MANDATORY
-./.venv/Scripts/kaggle.exe competitions submit -c pokemon-tcg-ai-battle \
-    -f work/out/<name>.tar.gz -m "<description> [uid=...]"
+TOKEN="$(cat ~/.kaggle/access_token)"
+curl -s -H "Authorization: Bearer $TOKEN" \
+  "https://www.kaggle.com/api/v1/kernels/list?competition=pokemon-tcg-ai-battle&sortBy=voteCount&pageSize=100"
+curl -s -H "Authorization: Bearer $TOKEN" \
+  "https://www.kaggle.com/api/v1/competitions/pokemon-tcg-ai-battle/leaderboard/download" -o lb.zip
+# join TeamMemberUserNames -> rank. Rank the AUTHOR, never the title.
 ```
 
 ---
 
-## 10. THE OTHER COMPETITION — $240,000, DEADLINE 2026-09-13
+## 8. THE OTHER COMPETITION — $240,000, DEADLINE 2026-09-13
 
-`pokemon-tcg-ai-battle-challenge-strategy` is a **separate competition**, four weeks after the
-ladder closes. **8 finalists × $30,000.** Submission is a **Kaggle Writeup, max 2000 words**, at
-`/competitions/pokemon-tcg-ai-battle-challenge-strategy/projects` — a saved draft that is never
-explicitly *Submitted* is not judged.
+`pokemon-tcg-ai-battle-challenge-strategy`, a **separate** competition four weeks after the ladder
+closes. **8 finalists × $30,000.** Submission is a Kaggle Writeup, max 2000 words, at
+`/competitions/pokemon-tcg-ai-battle-challenge-strategy/projects` — **a saved draft that is never
+explicitly Submitted is not judged.**
 
-Scoring: **Model 70%** (clarity, **originality and technical soundness**, consistency under
-repeated matches, **avoiding over-reliance on specific matchups**) / **Deck 20%** / **Report 10%**.
-It states explicitly that mid-tier ladder teams can still score highly through deep analysis.
+Scoring: Model **70%** (clarity; originality and technical soundness; consistency under repeated
+matches; avoiding over-reliance on specific matchups) / Deck **20%** / Report **10%**. It states
+that mid-tier ladder teams can still score highly through deep analysis.
 
-`WRITEUP_DRAFT.md` indexes the evidence we own. The strongest material is the measurement work:
-the calibrated field instrument, the noise floor measured on byte-identical twins, the
-refuted-ideas ledger, and the four silently-broken-component bugs — that is genuinely original and
-directly answers three of the five Model-score bullets.
+`WRITEUP_DRAFT.md` holds the evidence inventory, now 11 items. The strongest additions from
+2026-08-06 are §8 (out-of-sample calibration), §9 (a 1034.6 agent invalidated by meta drift alone),
+§10 (logit sizing — why matchup work cannot reach the target) and §11 (ACE SPEC / silent engine
+rejection).
 
 ---
 
-## 11. IMMEDIATE STATE / LOOSE ENDS
+## 9. IMMEDIATE STATE
 
-- **Nothing is running** (verify: `Get-CimInstance Win32_Process -Filter "Name='python.exe'"`).
-- **Uncommitted:** `work/tools/power_shot_rate.py`, `work/agents/w12_routed/`, and edits to
-  `work/tools/build_decidueye.py`. Commit or discard deliberately.
-- **9 commits are unpushed.** `git push` fails: Git Credential Manager's GitHub token stopped
-  working mid-session and it cannot prompt non-interactively
-  (`could not read Username for 'https://github.com'`). **Someone must run `git push` once from a
-  real terminal, or `gh auth login`.** Nothing is lost; everything is committed locally.
-- Search state files, if you want to resume any of them: `work/out/tune_router.json`,
-  `work/out/tune_coalition.json`, `work/out/tune_deck.json`, `work/out/tune_weights.json`.
-- Scratch bundles `_route_w*`, `_coal_w*`, `_deck_w*`, `_sub_*`, `w9_fastsetup*` are gitignored
-  and rebuildable; delete freely.
-
-## 12. IF YOU DO ONE THING
-
-Make the Decidueye build work (§6). It is the only structure found that beats the 30% of the field
-that caps us, its damage is verified in-engine, and its failure is a well-localised consistency
-problem with a low-variance metric (`power_shot_rate.py`) to steer by. Everything else on this base
-is measured and closed.
-
-Do not promise the user a number. Two honest calibration points exist (726 → 726.1, 830 → 829.5);
-use them, and say plainly when a projection is below 1040.
+- Verify nothing is running: `Get-CimInstance Win32_Process -Filter "Name='python.exe'"`.
+- `work/out/ft_w30.log` — full field test of `w30_search`.
+- `w40_cape` — the hand-written v26 policy with Unfair Stamp → Hero's Cape, plus `cape_guard.py`.
+  Guard verified live: the Cape lands on Grimmsnarl ex in 316 of 362 observations. A/B vs
+  `w5_grimmsnarl` was queued against the base policy's 0.5269.
+- **10+ commits are unpushed.** `git push` fails — Git Credential Manager's token stopped working
+  and it cannot prompt non-interactively. **Someone must run `git push` from a real terminal, or
+  `gh auth login`.** Nothing is lost.
+- Mined notebooks and the bundles extracted from them are gitignored and rebuildable with
+  `mine_notebook.py`; `w30_search` and `w40_cape` rebuild from their builders.

@@ -102,6 +102,57 @@ before any submission. **This section is the strongest originality material we h
 `deck_choice.py` computes archetype-vs-archetype win rates from real episodes with our code never
 touching play. Needed for the 20% Deck score — must be **recomputed for the deck we now ship**.
 
+### 8. The instrument makes out-of-sample predictions, and they land
+`field_test.py` measures a weighted win rate against the archetypes the **top 50** actually play,
+then converts it to a rating through a single anchor. It has now been checked against three live
+scores, one of which is a genuine **out-of-sample** test — an agent we do not own, never used to
+fit anything:
+
+| agent | field rate | predicted | actual live | error |
+|---|---|---|---|---|
+| `v61_codex_safe` | 0.4914 | 726.1 (anchor) | 726.1 | — |
+| **`w5_grimmsnarl`** (tetsutani's public bundle) | **0.6030** | **805** | **801.6** | **+3.4** |
+| `w8_grimm_tuned` (ours) | 0.6376 | 830 | 848.8 | −18.8 |
+
+Almost every entry will report a win rate. Reporting a *calibrated, out-of-sample-validated*
+mapping from local measurement to ladder rating is the single most defensible thing we own.
+**Figure: predicted vs actual, three points, y=x line.**
+
+### 9. Strength is not stationary — a 1034.6 agent is now worth 830
+The sharpest result of the project for the "consistency / no over-reliance on specific matchups"
+bullets. `tientrum` (ladder rank 88) published an agent that honestly converged to **1034.6** live
+on 2026-07-05. Measured today it wins **0.2525 (n=198)** against Marnie's Grimmsnarl ex — which
+grew into **32% of the top 50** after that build was live. Because that one archetype carries
+~47% of the panel weight, the agent is capped at
+
+    field ≤ 0.469 × 0.317 + 0.531 × 1.000 = 0.638
+
+i.e. *exactly* what we already have, even if it won **every** other matchup outright. A top-100
+agent was invalidated by meta drift alone, with no change to its code.
+**Figure: the cap bound, with each candidate's Grimmsnarl rate on the x-axis.**
+
+### 10. Knowing what a lever is worth before pulling it
+Rating moves with the **logit** of the field rate, and at 0.64 that curve is flat. So we sized
+every available improvement before building (`what_is_it_worth.py`):
+
+| change | field | rating |
+|---|---|---|
+| **every** non-mirror matchup → 0.95, mirror unchanged | 0.753 | **926** |
+| mirror alone → 0.95 | 0.835 | **1013** |
+| mirror 0.530 → 0.580 | 0.661 | **+18** |
+
+Winning every other matchup 95% of the time does not reach the top-50 cutoff. This is a
+quantitative answer to "which matchup should we work on", and it is why we stopped tuning.
+**Figure: rating vs field win rate, with the flat region marked.**
+
+### 11. Card text is not behaviour, and the engine fails silently
+Hero's Cape reads "+100 HP", which would turn our 320 HP attacker into a 3-hit body against the
+mirror's 180-damage attack. Verified in-engine at **+100 across 362 observations** — and then the
+60-card deck was **rejected outright**, because Hero's Cape is an **ACE SPEC** and this format
+allows exactly one, which our list already spends on Unfair Stamp. `battle_start` signals this by
+returning `None`, with no error. The same failure mode already cost this project a build around
+Enriching Energy. Every deck idea is now checked against the engine before a pilot is written.
+
 ---
 
 ## What is ours (needed to defend the originality bullet)
