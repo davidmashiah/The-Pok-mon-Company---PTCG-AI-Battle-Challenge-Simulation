@@ -37,3 +37,7 @@ work/agents/_coal_w*/
 # probe bundles built by build_fastsetup.py / sub-policy probes
 work/agents/_sub_*/
 work/agents/w9_fastsetup*/
+
+work/agents/_route_w*/
+work/agents/_probe_layers/
+work/agents/v200_decidueye/
