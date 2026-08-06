@@ -54,3 +54,8 @@ work/agents/w25_arist_imp/
 work/agents/w26_arist_prob/
 # build_search_layer.py regenerates this from w8_grimm_tuned.
 work/agents/w30_search/
+# search-layer variants: all regenerate from build_search_layer.py with the
+# knobs printed in its output, and each is a full copy of the w8 bundle.
+work/agents/w31_search5/
+work/agents/w32_search8/
+work/agents/w33_oppmodel/
