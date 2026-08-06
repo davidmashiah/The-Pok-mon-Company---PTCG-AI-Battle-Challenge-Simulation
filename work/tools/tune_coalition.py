@@ -41,7 +41,7 @@ OUT = os.path.join(WORK, "out")
 STATE = os.path.join(OUT, "tune_coalition.json")
 BEST = os.path.join(OUT, "coalition_best.json")
 
-BASE = "w7_grimm_safe"
+BASE = "w8_grimm_tuned"
 WFILE = "coalition_weights.json"
 
 # Top-band shares, from top_decks.py over the top 50 teams. Same table as
@@ -54,7 +54,7 @@ FIELD = [
     ("z_roman950",    0.02),
     ("w2_archaludon", 0.02),
 ]
-ANCHOR_FIELD = 0.6030            # w7's own measured field rate == projected 805
+ANCHOR_FIELD = 0.6376            # w8's measured field rate; live score 829.5
 
 # name -> (low, high). The support bonus is the majority-vote weight; the
 # others are Dirichlet-style smoothing counts, so they are scale-free and
@@ -228,8 +228,12 @@ def main():
 
     print(f"base smoothing: {base_sm}")
     print(f"objective: top-band field; accept above {ANCHOR_FIELD:.4f}")
+    # best_field ratchets. The first version compared every candidate against
+    # the FIXED anchor, so once the best had climbed to 0.6245 a candidate at
+    # 0.6231 still cleared "anchor + 0.02" and the search would have walked
+    # downhill while reporting accepts.
     st = {"round": 0, "accepted": 0, "screened": 0, "rejected_confirm": 0,
-          "best": dict(base_sm), "history": []}
+          "best": dict(base_sm), "best_field": ANCHOR_FIELD, "history": []}
     if os.path.exists(STATE):
         try:
             st = json.load(open(STATE))
@@ -248,18 +252,20 @@ def main():
                            3000 + st["round"] * 13)
         st["screened"] += 1
         chg = {k: v for k, v in cand.items() if base_sm.get(k) != v}
-        if scr <= ANCHOR_FIELD:
+        bar = st.get("best_field", ANCHOR_FIELD)
+        if scr <= bar:
             print(f"r{st['round']:3d} screen {scr:.3f} ({n1}) reject | {chg}")
             json.dump(st, open(STATE, "w"))
             continue
         conf, n2 = evaluate(cand, args.confirm, args.workers,
                             800000 + st["round"] * 977)
         pooled = (scr * n1 + conf * n2) / (n1 + n2)
-        ok = conf > ANCHOR_FIELD and pooled > ANCHOR_FIELD + 0.02
+        ok = conf > bar and pooled > bar + 0.02
         print(f"r{st['round']:3d} screen {scr:.3f} confirm {conf:.3f} "
               f"pooled {pooled:.3f} {'ACCEPT' if ok else 'reject'} | {chg}")
         if ok:
             st["best"] = cand
+            st["best_field"] = pooled
             st["accepted"] += 1
             st["history"].append({"round": st["round"], "pooled": pooled,
                                   "smoothing": cand})
