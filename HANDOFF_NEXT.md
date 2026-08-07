@@ -148,6 +148,7 @@ Added 2026-08-06:
 | **Adopting any published agent** | exhausted, §3. Nothing beats w8 |
 | **Deck tech on w8** | impossible, §2 |
 | **Hero's Cape as a 3-of** | **illegal.** It is ACE SPEC and the format allows exactly ONE; `battle_start` returns `None` with no error. Our deck already spends the slot on Unfair Stamp |
+| **More aggressive search** (`w31_search5`: det 5, cands 4, margin 700) | **field 0.5977 → 801**, worse than the 830 base. The mirror collapsed to **0.409** against w30's 0.538. Three knobs moved at once so it is not attributable — but the direction is unambiguous: the "validate, don't replace" discipline is load-bearing and the MARGIN is what enforces it. Do not lower it without a leaf that has earned it |
 | **Hero's Cape as the 1 ACE SPEC** (`w40_cape`) | **REFUTED, and it is a regression.** Against a matched control at the same n, under the same harness: control `_sub_handwritten_v26` **0.5523** (n=239), `w40_cape` **0.4417** (n=240), CIs [0.489,0.614] vs [0.380,0.505]. +100 HP is worth less than Unfair Stamp's post-knockout refuel — which is why 13 of the 16 top-50 Grimmsnarl teams decline it |
 
 ### The one thing that DID measure better: `w30_search`
@@ -179,6 +180,36 @@ The native search is fast and healthy: **2225 decisions/s**, ~0.45 ms/step, and 
 ~110 playouts/game in ~5 s/episode against a 600 s allowance.
 
 ---
+
+## 5b. THE TARGET IS THE MEAN, NOT THE CEILING
+
+`work/tools/draw_distribution.py`. The board takes the **max of the two active
+submissions**, and four byte-identical bundle pairs in our own history give a
+within-bundle draw **sd of 40.7** (w8 829/876, v51 690/780, v32 654/779, v14 ×4),
+largest positive deviation ever **+62**:
+
+| agent mean | P(draw ≥ 1000) | draws for even odds |
+|---|---|---|
+| 853 (today) | 0.02% | 4519 |
+| 900 | 0.70% | 98 |
+| **930** | **4.28%** | **16** |
+| **950** | **11.0%** | **6** |
+
+At 5 submissions/day this reframes the whole problem: **the engineering target is
++80 to the MEAN, not +190**, and small measured gains compound with variance
+instead of being swamped by it. Two mechanics bound it, and both are rules not
+opinions: only the last two submissions stay active, and a new one evicts the
+OLDER — so submitting *once* throws a good draw away for a worse expected max,
+and the only correct play is to submit the agent you want as a **pair**, then
+STOP the moment a draw converges above target.
+
+### A proven-viable upgrade that is NOT yet safe to ship
+The rollout could use the bundle's real policy instead of the greedy:
+`dataclasses.asdict` on a search observation costs **1.5 ms** and w8's own
+`agent()` **accepts** the converted dict and decides in 15 ms — about 60 s/episode,
+still only 10% of the allowance. **Hazard, do not skip:** calling the real agent
+inside a rollout mutates `_HISTORY` and the guards' per-episode state, silently
+corrupting the live game's tracking. It needs snapshot/restore first.
 
 ## 6. THE HONEST ARITHMETIC ON 1040
 
