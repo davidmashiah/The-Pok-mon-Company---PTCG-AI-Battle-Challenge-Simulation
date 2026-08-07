@@ -38,7 +38,7 @@ _last = [0.0]
 # 55274352 is v61_codex_safe, the adopted base and current champion. The two
 # v51 draws are kept because the archetype mix we are matched into shifts with
 # our rating, and comparing the two rating bands is the point.
-OUR_SUBS = ["55299973", "55305926"]   # the two live w8_grimm_tuned draws
+OUR_SUBS = ["55310358", "55310346"]   # the two live w34_koroll draws
 
 # archetype signatures: a card that only that deck plays
 ARCHETYPES = [
