@@ -66,10 +66,21 @@ def bundle_hash(agent):
     h.update(f"harness{HARNESS}".encode())
     parts = []
     d = os.path.join(WORK, "agents", agent)
-    for fn in sorted(os.listdir(d)):
-        if fn == "__pycache__":
-            continue
-        parts.append(os.path.join(d, fn))
+    # WALK, do not listdir. os.listdir saw only the TOP level, so any bundle
+    # whose behaviour lives in a subdirectory hashed identically to its parent
+    # -- and pooled its games into the parent's cell. Caught by tune_prefs.py,
+    # whose mutations edit policies/handwritten_v26/manual_policy.py: 46
+    # different mutants all reported ~0.518 with a confidence interval far too
+    # tight for n=200, because every one of them was reading the same
+    # accumulated cell. That is the exact failure this store exists to prevent,
+    # and it silently applies to every agent here with a policies/ or experts/
+    # tree.
+    for root, dirs, files in os.walk(d):
+        dirs[:] = sorted(x for x in dirs if x != "__pycache__")
+        for fn in sorted(files):
+            if fn.endswith((".pyc", ".pyo")):
+                continue
+            parts.append(os.path.join(root, fn))
     # The learned model lives outside the agent dir. If it is not hashed, a
     # retrained net silently pools its games with the OLD net's results in the
     # same cell -- the one thing this store exists to prevent. Only agents that
