@@ -37,9 +37,20 @@ WORK = os.path.dirname(HERE)
 ROOT = os.path.dirname(WORK)
 AGENTS = os.path.join(WORK, "agents")
 OUT = os.path.join(WORK, "out")
-BASE = "_sub_handwritten_v26"
 OPPONENT = "w5_grimmsnarl"
-POLICY = os.path.join("policies", "handwritten_v26", "manual_policy.py")
+
+# Which basin to climb. The bundle ships six complete policies and they are NOT
+# equivalent -- measured vs the mirror under the clean harness they span 0.39 to
+# 0.56, and on the full panel _sub_v28 reaches 0.6687 against
+# _sub_handwritten_v26's 0.6495. Climbing one starting point can only find that
+# basin's peak, so the base is a parameter.
+BASINS = {
+    "_sub_v28": os.path.join("policies", "v28", "v26_manual_policy.py"),
+    "_sub_handwritten_v26": os.path.join("policies", "handwritten_v26",
+                                         "manual_policy.py"),
+}
+BASE = "_sub_v28"
+POLICY = BASINS[BASE]
 STATE = os.path.join(OUT, "tune_prefs.json")
 
 IDS_RE = re.compile(r"^(\s*)ids\s*(\+?=)\s*\[([A-Z_0-9,\s]+)\]\s*$", re.M)
@@ -117,7 +128,12 @@ def main():
     ap.add_argument("--games", type=int, default=200)
     ap.add_argument("--workers", type=int, default=6)
     ap.add_argument("--slot", default="_pref_cand")
+    ap.add_argument("--base", default="_sub_v28", choices=sorted(BASINS))
+    global BASE, POLICY, STATE
     a = ap.parse_args()
+    BASE = a.base
+    POLICY = BASINS[BASE]
+    STATE = os.path.join(OUT, f"tune_prefs_{BASE}.json")
 
     base_src = open(os.path.join(AGENTS, BASE, POLICY), encoding="utf-8").read()
     lists = find_lists(base_src)
