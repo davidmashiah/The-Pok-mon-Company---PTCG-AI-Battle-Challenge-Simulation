@@ -40,9 +40,18 @@ def load(name):
         exec(compile(open(os.path.join(full, "main.py"),
                           encoding="utf-8-sig").read(), "main.py", "exec"), env)
         fn = [v for v in env.values() if callable(v)][-1]
-        d = fn({"current": None, "select": None})
+        # Some bundles call to_observation_class on the setup frame, which
+        # needs `logs` present (w1_alakazam raises TypeError without it).
+        try:
+            d = fn({"current": None, "select": None, "logs": []})
+        except Exception:
+            d = None
     finally:
         os.chdir(cwd)
+        # Do NOT evict this bundle's modules: unlike the gauntlet we keep a
+        # handle on the agent's own search_validator to read its counters. The
+        # opponent is loaded second, so only IT could shadow, and the panel
+        # opponents ship no module names in common with the w8 family.
     if not (isinstance(d, (list, tuple)) and len(d) == 60):
         d = [int(x) for x in open(os.path.join(full, "deck.csv"),
                                   encoding="utf-8").read().split() if x.strip()]
@@ -68,7 +77,10 @@ def main():
     for g in range(a.games):
         sv.reset_stats()
         for f in (fa, fb):
-            f({"current": None, "select": None})
+            try:
+                f({"current": None, "select": None, "logs": []})
+            except Exception:
+                pass
         first = (g % 2 == 0)
         p0, p1 = (fa, fb) if first else (fb, fa)
         d0, d1 = (da, db) if first else (db, da)

@@ -93,6 +93,9 @@ ENABLED = _i("PTCG_SEARCH_ON", 1)
 GATE = _f("PTCG_SEARCH_GATE", __GATE__)
 # Search non-MAIN prompts too (Munkidori targeting, Boss target, promote).
 SEARCH_NONMAIN = _i("PTCG_SEARCH_NONMAIN", __NONMAIN__)
+# In the mirror, keep to MAIN only -- the bundle's own guards beat the search
+# on those prompts. Outside it, search everything.
+MIRROR_MAIN_ONLY = _i("PTCG_SEARCH_MIRROR_MAIN", __MIRRORMAIN__)
 
 # Real 60-card lists read verbatim out of the top-50 teams' own replays. The
 # opponent's hidden cards are dealt from whichever of these best explains the
@@ -328,6 +331,23 @@ def _match_opponent(o, opp_idx, my_deck):
     return list(best)
 
 
+_MIRROR_SIG = 648                  # Marnie's Grimmsnarl ex
+
+
+def _opponent_is_mirror(o, opp_idx, my_deck):
+    """Are we in the mirror? Decided from cards we have SEEN, then from the
+    matched list -- never assumed. Before any evidence arrives this returns
+    True, which is the safe default: Grimmsnarl is 32% of the top 50, and the
+    cost of wrongly searching a mirror decision is larger than the cost of
+    wrongly skipping one elsewhere."""
+    seen = _seen_opponent(o, opp_idx)
+    if _MIRROR_SIG in seen:
+        return True
+    if len(seen) < _MIN_MATCH:
+        return True
+    return _MIRROR_SIG in _match_opponent(o, opp_idx, my_deck)
+
+
 def _opp_pool(o, me_idx, my_deck):
     """The matched list MINUS everything we have already watched them play.
 
@@ -451,8 +471,23 @@ def validate(obs_dict, chosen, my_deck):
     if o.select is None:
         return None
     is_main = (o.select.context == SelectContext.MAIN)
-    if not (is_main or SEARCH_NONMAIN):
-        return None
+    if not is_main:
+        if not SEARCH_NONMAIN:
+            return None
+        # Searching non-MAIN prompts is worth a lot OUTSIDE the mirror and
+        # costs a lot inside it. Measured on the same panel, w36 (all decisions)
+        # against w34 (MAIN only): Alakazam +0.094, Crustle +0.069, but
+        # Grimmsnarl -0.112. The reason is in the bundle: it ships hand-written
+        # guards built for exactly these mirror decisions
+        # (munkidori_lethal_guard, shadow_bullet_double_ko_guard), and a crude
+        # rollout overrides them badly. Against other archetypes those guards do
+        # not apply and the search wins.
+        #
+        # We already know who we are playing -- the opponent model matched their
+        # deck -- so spend the extra coverage only where it pays.
+        if MIRROR_MAIN_ONLY and _opponent_is_mirror(o, 1 - o.current.yourIndex,
+                                                    my_deck):
+            return None
     opts = o.select.option or []
     if len(opts) < 2 or o.current is None:
         return None
@@ -571,6 +606,8 @@ def main():
     ap.add_argument("--margin", type=float, default=1000.0)
     ap.add_argument("--gate", type=float, default=0.0)
     ap.add_argument("--nonmain", type=int, default=0)
+    ap.add_argument("--mirror-main-only", dest="mirrormain",
+                    type=int, default=1)
     a = ap.parse_args()
 
     src = os.path.join(AGENTS, BASE)
@@ -609,9 +646,10 @@ def main():
             .replace("__CANDS__", repr(a.cands))
             .replace("__MARGIN__", repr(a.margin))
             .replace("__GATE__", repr(a.gate))
-            .replace("__NONMAIN__", repr(a.nonmain)))
+            .replace("__NONMAIN__", repr(a.nonmain))
+            .replace("__MIRRORMAIN__", repr(a.mirrormain)))
     for tok in ("__BUDGET__", "__DET__", "__CANDS__", "__MARGIN__", "__GATE__",
-                "__NONMAIN__"):
+                "__NONMAIN__", "__MIRRORMAIN__"):
         if tok in body:
             raise SystemExit(f"placeholder {tok} not substituted")
     with open(os.path.join(dst, "search_validator.py"), "w",
@@ -636,7 +674,8 @@ def main():
 
     print(f"built work/agents/{a.name} from {BASE}")
     print(f"  budget={a.budget}s det={a.det} cands={a.cands} "
-          f"margin={a.margin} gate={a.gate} nonmain={a.nonmain} (baked in)")
+          f"margin={a.margin} gate={a.gate} nonmain={a.nonmain} "
+          f"mirror_main_only={a.mirrormain} (baked in)")
     print("  + search_validator.py")
     print(f"  + {len(PATCHES)} asserted patches to main.py")
     return 0
