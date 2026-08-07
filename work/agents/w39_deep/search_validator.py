@@ -1,48 +1,4 @@
-"""w30_search = w8_grimm_tuned + a determinized search that VALIDATES its choice.
-
-Why this is worth building even though "search failed here" is in the ledger:
-
-  v57_pimc_full's search never executed a single playout. It sets `_SEARCH_OK`
-  from whether the IMPORT succeeds, then calls
-  `search_begin(obs, your_deck=yd)` -- but this engine's search_begin takes
-  seven required positional arguments, so every call raised TypeError straight
-  into `except Exception: return None` at the bottom of SEARCH_ALGO. It played
-  as a pure heuristic for its entire 701.8-point ladder run. Verified two ways:
-  the signature (work/tools/search_probe.py) and the exception path in its own
-  source. That makes it the fifth silently-broken component in this repo, and
-  it means the refuted-ideas entry for playout search never tested playouts.
-
-  Meanwhile the engine's native search is fast -- measured 2225 decisions/s,
-  ~0.45 ms per step -- and tientrum (ladder rank 88, a build that genuinely
-  scored 1034.6 live) reports this exact layer was "the single biggest lever in
-  our whole project, bigger than any amount of further heuristic tuning".
-
-Design, chosen against this repo's failure history:
-  * It VALIDATES, never replaces. Candidates are only ever the policy's OWN
-    top-K, and its pick is overridden only when a challenger wins by a margin.
-    w8 is a 0.6376 policy; the downside of a bad search is bounded by how often
-    it clears the margin, not by the search's own quality.
-  * Leaf is prizes-first arithmetic, not a learned value net. Three separate
-    value nets here looked good offline and never converted, and the previous
-    search attempts "failed AT the evaluator".
-  * Rollouts complete the WHOLE turn and then the opponent's reply, because
-    attacking ends the turn -- comparing mid-turn states compares nothing.
-  * Everything is instrumented. A component that silently does nothing is the
-    single most expensive bug class in this project.
-
-  python work/tools/build_search_layer.py --name w30_search
-"""
-import argparse
-import os
-import shutil
-import sys
-
-HERE = os.path.dirname(os.path.abspath(__file__))
-WORK = os.path.dirname(HERE)
-AGENTS = os.path.join(WORK, "agents")
-BASE = "w8_grimm_tuned"
-
-VALIDATOR = r'''"""Determinized search over the policy's own top-K candidates.
+"""Determinized search over the policy's own top-K candidates.
 
 Knobs come from the environment so a tuner never has to rewrite a file inside
 the bundle -- rewriting bundle config is what silently invalidated an entire
@@ -92,24 +48,22 @@ def _i(name, default):
         return int(default)
 
 
-BUDGET_S = _f("PTCG_SEARCH_BUDGET", __BUDGET__)
-DETERMINIZATIONS = _i("PTCG_SEARCH_DET", __DET__)
-MAX_CANDIDATES = _i("PTCG_SEARCH_CANDS", __CANDS__)
-MARGIN = _f("PTCG_SEARCH_MARGIN", __MARGIN__)
+BUDGET_S = _f("PTCG_SEARCH_BUDGET", 8.0)
+DETERMINIZATIONS = _i("PTCG_SEARCH_DET", 12)
+MAX_CANDIDATES = _i("PTCG_SEARCH_CANDS", 4)
+MARGIN = _f("PTCG_SEARCH_MARGIN", 1000.0)
 ROLLOUT_STEPS = _i("PTCG_SEARCH_STEPS", 30)
 ENABLED = _i("PTCG_SEARCH_ON", 1)
 # Only search when the policy's own top two options are within GATE of each
 # other. 0 disables the gate (search every eligible decision).
-GATE = _f("PTCG_SEARCH_GATE", __GATE__)
+GATE = _f("PTCG_SEARCH_GATE", 0.0)
 # Search non-MAIN prompts too (Munkidori targeting, Boss target, promote).
-SEARCH_NONMAIN = _i("PTCG_SEARCH_NONMAIN", __NONMAIN__)
+SEARCH_NONMAIN = _i("PTCG_SEARCH_NONMAIN", 0)
 # In the mirror, keep to MAIN only -- the bundle's own guards beat the search
 # on those prompts. Outside it, search everything.
-MIRROR_MAIN_ONLY = _i("PTCG_SEARCH_MIRROR_MAIN", __MIRRORMAIN__)
+MIRROR_MAIN_ONLY = _i("PTCG_SEARCH_MIRROR_MAIN", 1)
 # Play our side of the rollout with the real policy instead of the greedy.
-POLICY_ROLLOUT = _i("PTCG_SEARCH_POLICY_ROLLOUT", __POLICYROLL__)
-# Play the OPPONENT's reply with the real policy too, mirror only.
-OPP_POLICY_MIRROR = _i("PTCG_SEARCH_OPP_POLICY", __OPPPOLICY__)
+POLICY_ROLLOUT = _i("PTCG_SEARCH_POLICY_ROLLOUT", 0)
 
 # Real 60-card lists read verbatim out of the top-50 teams' own replays. The
 # opponent's hidden cards are dealt from whichever of these best explains the
@@ -303,7 +257,7 @@ def _policy_pick(o):
     return None
 
 
-def _rollout(sid, o, me_idx, opp_is_mirror=False):
+def _rollout(sid, o, me_idx):
     """Finish our turn, let the opponent answer once, then score."""
     start_turn = o.current.turn
     ability_used = [0]
@@ -317,14 +271,7 @@ def _rollout(sid, o, me_idx, opp_is_mirror=False):
         if o.select is None or not (o.select.option or []):
             break
         pick = None
-        mine = (st.yourIndex == me_idx)
-        # Our side: the real policy when enabled. THEIR side: the real policy
-        # only in the mirror, where they are provably piloting our own 60 cards
-        # and manual_policy is the right model of them rather than a miscast
-        # one. Their reply is what the leaf's danger assessment rests on, and
-        # the mirror is ~47% of the panel weight.
-        if ((POLICY_ROLLOUT and mine)
-                or (OPP_POLICY_MIRROR and opp_is_mirror and not mine)):
+        if POLICY_ROLLOUT and st.yourIndex == me_idx:
             pick = _policy_pick(o)
         if not pick:
             pick = _greedy(o, ability_used)
@@ -443,7 +390,7 @@ def _determinize(o, me_idx, my_deck, opp_pool):
             ref[od + op_:od + op_ + oh])
 
 
-def _playout(o, me_idx, det, pick, mirror=False):
+def _playout(o, me_idx, det, pick):
     """One candidate, one FIXED determinization -> leaf value."""
     sid = None
     try:
@@ -454,8 +401,7 @@ def _playout(o, me_idx, det, pick, mirror=False):
         nxt = search_step(sid, list(pick))
         if nxt is None or nxt.observation is None:
             return None
-        val, sid = _rollout(nxt.searchId, nxt.observation, me_idx,
-                            mirror)
+        val, sid = _rollout(nxt.searchId, nxt.observation, me_idx)
         _STATS["playouts"] += 1
         return val
     except Exception:
@@ -471,8 +417,7 @@ def _playout(o, me_idx, det, pick, mirror=False):
                 pass
 
 
-def _score_all(o, me_idx, my_deck, opp_pool, cands, dets, deadline,
-               mirror=False):
+def _score_all(o, me_idx, my_deck, opp_pool, cands, dets, deadline):
     """PAIRED comparison: every candidate is judged on the SAME hidden-info
     samples, so the difference between two candidates is not contaminated by
     the difference between two shuffles.
@@ -494,7 +439,7 @@ def _score_all(o, me_idx, my_deck, opp_pool, cands, dets, deadline,
         det = _determinize(o, me_idx, my_deck, opp_pool)
         vals = {}
         for c in cands:
-            v = _playout(o, me_idx, det, [c], mirror)
+            v = _playout(o, me_idx, det, [c])
             if v is not None:
                 vals[c] = v
         if len(vals) < len(cands):
@@ -591,8 +536,7 @@ def validate(obs_dict, chosen, my_deck):
     _saved = dict(_MP._RUNTIME_PLAYERS) if (_MP is not None and POLICY_ROLLOUT) else None
     try:
         scored, wins, n = _score_all(o, me_idx, my_deck, opp_pool, cands,
-                                     DETERMINIZATIONS, deadline,
-                                     _opponent_is_mirror(o, 1 - me_idx, my_deck))
+                                     DETERMINIZATIONS, deadline)
     finally:
         if _saved is not None:
             _MP._RUNTIME_PLAYERS.clear()
@@ -631,132 +575,3 @@ def validate(obs_dict, chosen, my_deck):
         return None
     _STATS["overrode"] += 1
     return [best]
-'''
-
-
-PATCHES = [
-    # 1. make the validator importable from the bundle
-    ("import human_memory as human_memory\n",
-     "import human_memory as human_memory\nimport search_validator\n"),
-    # 2. hand the validator the model's FULL ranking of this decision's options
-    ("    order = sorted(range(option_count), key=lambda index: (-scores[index], index))\n"
-     "    return sorted(order[:selected_count]), semantics\n",
-     "    order = sorted(range(option_count), key=lambda index: (-scores[index], index))\n"
-     "    search_validator.note_rank(order, scores)\n"
-     "    return sorted(order[:selected_count]), semantics\n"),
-    # 3. clear last decision's ranking before this one is scored
-    ("    try:\n        fallback = strategic_agent(obs)\n",
-     "    search_validator.reset_decision()\n"
-     "    try:\n        fallback = strategic_agent(obs)\n"),
-    # 4. the search runs LAST, after every guard has had its say
-    ("    if not _legal(chosen, select, option_count):\n"
-     "        chosen = fallback\n",
-     "    try:\n"
-     "        validated = search_validator.validate(obs, chosen, DECK)\n"
-     "    except Exception:\n"
-     "        validated = None\n"
-     "    if validated is not None and _legal(validated, select, option_count):\n"
-     "        chosen = validated\n"
-     "    if not _legal(chosen, select, option_count):\n"
-     "        chosen = fallback\n"),
-]
-
-
-def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--name", default="w30_search")
-    # Baked into the generated file, NOT read from the environment at measure
-    # time: gauntlet keys its accumulating store on a content hash of the
-    # bundle, and an env var is invisible to that hash. Two differently-tuned
-    # runs would silently pool into one cell.
-    ap.add_argument("--budget", type=float, default=0.60)
-    ap.add_argument("--det", type=int, default=3)
-    ap.add_argument("--cands", type=int, default=3)
-    ap.add_argument("--margin", type=float, default=1000.0)
-    ap.add_argument("--gate", type=float, default=0.0)
-    ap.add_argument("--nonmain", type=int, default=0)
-    ap.add_argument("--mirror-main-only", dest="mirrormain",
-                    type=int, default=1)
-    ap.add_argument("--policy-rollout", dest="policyroll",
-                    type=int, default=0)
-    ap.add_argument("--opp-policy-mirror", dest="opppolicy",
-                    type=int, default=0)
-    a = ap.parse_args()
-
-    src = os.path.join(AGENTS, BASE)
-    dst = os.path.join(AGENTS, a.name)
-    if os.path.isdir(dst):
-        shutil.rmtree(dst)
-    shutil.copytree(src, dst, ignore=shutil.ignore_patterns("__pycache__"))
-
-    # Bundle the real opponent decklists read out of the top-50 teams' replays.
-    lib = []
-    try:
-        import json
-        store = json.load(open(os.path.join(WORK, "out", "top_decks.json"),
-                               encoding="utf-8"))
-        seen = set()
-        for team in store.values():
-            for deck in (team.get("decks") or []):
-                if deck and len(deck) == 60:
-                    key = tuple(sorted(deck))
-                    if key not in seen:
-                        seen.add(key)
-                        lib.append(list(key))
-    except Exception as exc:
-        print(f"  WARNING: no opponent library ({type(exc).__name__}); "
-              f"search will fall back to the Grimmsnarl prior")
-    with open(os.path.join(dst, "opp_library.py"), "w", encoding="utf-8") as f:
-        f.write('"""Real 60-card lists, read verbatim out of the setup frame of\n'
-                'the top-50 teams\' own replays by work/tools/top_decks.py.\n'
-                'Generated -- do not hand-edit."""\n')
-        f.write(f"DECKS = {lib!r}\n")
-    print(f"  + opp_library.py ({len(lib)} real top-50 decklists)")
-
-    body = (VALIDATOR
-            .replace("__BUDGET__", repr(a.budget))
-            .replace("__DET__", repr(a.det))
-            .replace("__CANDS__", repr(a.cands))
-            .replace("__MARGIN__", repr(a.margin))
-            .replace("__GATE__", repr(a.gate))
-            .replace("__NONMAIN__", repr(a.nonmain))
-            .replace("__MIRRORMAIN__", repr(a.mirrormain))
-            .replace("__POLICYROLL__", repr(a.policyroll))
-            .replace("__OPPPOLICY__", repr(a.opppolicy)))
-    for tok in ("__BUDGET__", "__DET__", "__CANDS__", "__MARGIN__", "__GATE__",
-                "__NONMAIN__", "__MIRRORMAIN__", "__POLICYROLL__",
-                "__OPPPOLICY__"):
-        if tok in body:
-            raise SystemExit(f"placeholder {tok} not substituted")
-    with open(os.path.join(dst, "search_validator.py"), "w",
-              encoding="utf-8") as f:
-        f.write(body)
-    compile(body, "search_validator.py", "exec")
-
-    p = os.path.join(dst, "main.py")
-    text = open(p, encoding="utf-8").read()
-    for i, (anchor, repl) in enumerate(PATCHES, 1):
-        # Assert every anchor. A patch that silently finds nothing is how a
-        # "fixed" bundle ships unchanged -- it has happened here before.
-        if anchor not in text:
-            raise SystemExit(f"PATCH {i} ANCHOR NOT FOUND:\n{anchor!r}")
-        if text.count(anchor) != 1:
-            raise SystemExit(f"PATCH {i} anchor is not unique "
-                             f"({text.count(anchor)} matches)")
-        text = text.replace(anchor, repl)
-    compile(text, "main.py", "exec")
-    with open(p, "w", encoding="utf-8") as f:
-        f.write(text)
-
-    print(f"built work/agents/{a.name} from {BASE}")
-    print(f"  budget={a.budget}s det={a.det} cands={a.cands} "
-          f"margin={a.margin} gate={a.gate} nonmain={a.nonmain} "
-          f"mirror_main_only={a.mirrormain} policy_rollout={a.policyroll} "
-          f"(baked in)")
-    print("  + search_validator.py")
-    print(f"  + {len(PATCHES)} asserted patches to main.py")
-    return 0
-
-
-if __name__ == "__main__":
-    sys.exit(main())
