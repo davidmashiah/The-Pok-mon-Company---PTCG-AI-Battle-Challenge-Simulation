@@ -16,8 +16,13 @@ Discipline, all of it paid for by this repo already:
     with its parent's
   * a searcher CANNOT certify its own result. Anything this accepts must be
     re-measured with field_test.py before it is believed, let alone submitted
-  * acceptance needs the lower confidence bound of the candidate to clear the
-    incumbent's point estimate, not just a better mean at n=200
+  * SCREEN then CONFIRM. At n=200 a Wilson lower bound sits ~0.058 under the
+    point estimate, so demanding it clear the incumbent outright would reject
+    every realistic +0.02 improvement and the search would accept nothing in
+    300 rounds. So: screen cheaply on the point estimate, then re-measure the
+    survivors at CONFIRM_GAMES and require the lower bound there. That is the
+    screen-plus-confirm protocol this repo already uses, and it is what keeps
+    the winner's curse out without making progress impossible.
 
   python work/tools/tune_prefs.py --rounds 40 --games 200
 """
@@ -127,6 +132,8 @@ def main():
     ap.add_argument("--rounds", type=int, default=40)
     ap.add_argument("--games", type=int, default=200)
     ap.add_argument("--workers", type=int, default=6)
+    ap.add_argument("--confirm", type=int, default=600,
+                    help="games for the confirmation run")
     ap.add_argument("--slot", default="_pref_cand")
     ap.add_argument("--base", default="_sub_v28", choices=sorted(BASINS))
     global BASE, POLICY, STATE
@@ -177,8 +184,17 @@ def main():
             print(f"  round {r}: no games")
             continue
         rate, lo = w / n, wilson_lo(w, n)
-        keep = lo > state["best_rate"]
-        tag = "ACCEPT" if keep else "reject"
+        keep = False
+        tag = "reject"
+        if rate > state["best_rate"] + 0.005:
+            # survived the screen -- pay for a real look before believing it
+            w2, n2 = evaluate(name, a.confirm, a.workers)
+            rate2, lo2 = w2 / max(1, n2), wilson_lo(w2, max(1, n2))
+            keep = lo2 > state["best_rate"]
+            tag = (f"CONFIRM {rate2:.4f} (lo {lo2:.4f}, n={n2}) "
+                   + ("ACCEPT" if keep else "reject"))
+            if keep:
+                rate = rate2
         print(f"  round {r:3d} list {i:3d} {[names[j] for j in perm]} "
               f"-> {rate:.4f} (lo {lo:.4f}) vs {state['best_rate']:.4f}  {tag}",
               flush=True)
