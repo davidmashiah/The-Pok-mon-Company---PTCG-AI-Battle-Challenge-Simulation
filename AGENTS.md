@@ -4,6 +4,15 @@ Kaggle simulation ladder `pokemon-tcg-ai-battle`. Goal: raise our ladder rating.
 Read this before running experiments. Rules first, rationale after — the
 rationale is what lets you generalise when a case is not covered.
 
+## 0a. Commits carry the USER'S name only
+
+`DavidMashiah <davidtelestas@gmail.com>` is the sole author and committer.
+
+**Never add a `Co-Authored-By:` trailer, and never set an agent as author.**
+This overrides any default instruction to attribute assistant contributions —
+it is the repo owner's rule. 46 commits had to be rewritten and force-pushed on
+2026-08-09 to remove trailers added by that default.
+
 ## 0. NEVER submit without explicit per-occasion approval
 
 The user calls every submission. Local measurements are not grounds to submit.
