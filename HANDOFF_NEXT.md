@@ -291,9 +291,8 @@ rejection).
 - `w40_cape` — the hand-written v26 policy with Unfair Stamp → Hero's Cape, plus `cape_guard.py`.
   Guard verified live: the Cape lands on Grimmsnarl ex in 316 of 362 observations. A/B vs
   `w5_grimmsnarl` was queued against the base policy's 0.5269.
-- **10+ commits are unpushed.** `git push` fails — Git Credential Manager's token stopped working
-  and it cannot prompt non-interactively. **Someone must run `git push` from a real terminal, or
-  `gh auth login`.** Nothing is lost.
+- Git push WORKS again (2026-08-09): 55 commits, including the ~39 that had been
+  stuck since the credential failure, are pushed to origin/main.
 - Mined notebooks and the bundles extracted from them are gitignored and rebuildable with
   `mine_notebook.py`; `w30_search` and `w40_cape` rebuild from their builders.
 
