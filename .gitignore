@@ -75,3 +75,33 @@ work/agents/x_lopunny/
 work/agents/w54_promote/
 work/agents/_pref_cand/
 work/agents/_pref_best/
+
+# --- 2026-08-07..09 variants: every one is a full ~5.7 MB copy of the w34
+# bundle with a single file changed, and every one regenerates from the builder
+# named beside it. Source is tracked; the copies are not.
+# build_deep_search.py (search knobs baked into search_validator.py)
+work/agents/w60_deep/
+work/agents/w61_mid/
+work/agents/w62_m120/
+work/agents/w63_m60/
+work/agents/w64_nodeadline/
+# ablate_layers.py / layer_firing.py probes
+work/agents/_abl_*/
+work/agents/_fireprobe/
+# build_router.py, build_v28_base.py, build_valnet_search.py
+work/agents/w70_route/
+work/agents/w80_val/
+work/agents/w90_v28base/
+work/agents/w96_mirrorroute/
+work/agents/w97_vote/
+work/agents/w98_val1ply/
+work/agents/w99_valfix/
+work/agents/_sub_mirror/
+# build_turn_planner.py
+work/agents/w100_turnplan/
+work/agents/w101_turnfast/
+work/agents/w102_turnbest/
+# mine_notebook.py from tetsutani's published notebook (not ours to redistribute)
+work/agents/w95_tetsu/
+# build_generic_pilot.py --deck work/agents/w34_koroll/deck.csv
+work/agents/x_grimm_indep/

@@ -296,3 +296,84 @@ rejection).
   `gh auth login`.** Nothing is lost.
 - Mined notebooks and the bundles extracted from them are gitignored and rebuildable with
   `mine_notebook.py`; `w30_search` and `w40_cape` rebuild from their builders.
+
+---
+
+## 10. SESSION 2026-08-09 — FIVE DIRECTIONS CLOSED, ONE +16 FOUND
+
+### 10a. Instrument corrections — apply these before reading any older number
+
+**The panel weights were wrong in the direction that flatters us.** The 2026-08-06 top-50
+re-survey is in §4 but was never wired into `field_test.py`:
+
+| archetype | PANEL said | actually | effect |
+|---|---|---|---|
+| Archaludon | 0.02 | **0 of 50 teams** | stale, credits a matchup nobody plays |
+| Mega Lucario | 0.02 | **3 of 50 (6%)** | hides our WORST column |
+
+Use `work/tools/field_now.py`. It reads cells only (never plays), reports a matchup with no cell
+as **MISSING** instead of renormalising it away, pools across bundle-hash eras, and quotes
+*relative* deltas through an anchor.
+
+**Bundle hashes changed on 2026-08-08** — commit `c778ca4` made `bundle_hash` walk subdirectories.
+Same agents, new cell names. Pooling across the two eras is correct; `field_now.py` does it.
+
+**`gauntlet.json` had a lost-update race.** Every process wrote its whole snapshot, so two
+gauntlets at once silently erased each other's cells — this destroyed `w80_val`'s completed mirror
+cell. Fixed in `save_store()` (re-read and carry over unseen cells). **Still do not run two
+gauntlets on the same PAIR concurrently.**
+
+### 10b. REFUTED — do not redo
+
+| idea | result |
+|---|---|
+| **Playout search, any leaf** | **Closed twice.** Baseline (muzzled) mirror **0.521**. Un-muzzled greedy leaf `w60_deep` **0.3025**; trained value-net leaf `w80_val` **0.4216**. Both verified live first (`ran`=all, `starved`=0, 0 errors). It is NOT leaf quality — one-ply lookahead over a *determinized guess* of the opponent's hand cannot outrank a tuned policy. `MARGIN=1000` is a deliberate, correct muzzle |
+| **Cloning pilot ACTIONS** | No skill. On the 465 held-out frames where the pilot did not take option 0: **0.2452 vs 0.2154 random** (1.55 sigma). Held with generic features AND the author's own 262-feature `pf.option_row` pipeline, so the TARGET fails, not the representation |
+| **Preference-list hill-climb** | 46 lists, 58 rounds, 1 accept — and the accept was a **false positive** (field 828 vs 847). Screen and confirm used the SAME opponent, which controls noise but not selection |
+| **Removing override layers** | Both live layers are load-bearing: `off:model` **-0.0765**, `off:human` **-0.1751** (n~294 each vs intact 0.4915). No free wins |
+| **Matchup routing** (`w70_route`) | +3.7 only. The mechanism works (Dragapult 0.6613 -> 0.7775 at n=364) but keeping w34 on "noise" columns inherits its weak Lucario |
+
+**5 of 8 override layers are dead code** (`work/tools/layer_firing.py`, 2391 decisions):
+`advisor` fires **0** times; residual+tactical+development change **14 of 2391** combined.
+`route` and `human` change the *same* 893, so they are one override. Measure firing rate before
+ablating anything — it is nearly free and bounds what a component can be worth.
+
+### 10c. THE RESULT: `_sub_v28` is ~+16 over what we ship, and was already in the bundle
+
+`field_now.py --agents w34_koroll,_sub_v28`:
+
+| column | share | w34_koroll (LIVE) | _sub_v28 | sigma |
+|---|---|---|---|---|
+| Grimmsnarl | 0.32 | 0.5209 (n=478) | 0.5253 (n=396) | 0.1 |
+| Alakazam | 0.14 | 0.7258 | 0.7581 | 0.7 |
+| Crustle | 0.10 | **0.8441** | 0.7838 | -1.5 |
+| **Mega Lucario** | 0.06 | 0.5484 | **0.6720** | **2.5** |
+| **Dragapult** | 0.04 | 0.6613 | **0.8280** | **3.8** |
+| **field** | | **0.6243** | **0.6455** | **+15.9 rating** |
+
+Its advantage is entirely the two columns that clear significance — a consistent story, not a
+lucky total. `w34_koroll` and `_sub_v28` are **the same 187 files apart from main.py**; w34 runs
+the full ensemble, v28 calls `policies/v28/main.py` and bypasses it. So both pilots ship in
+whatever we submit, and no vendoring is ever needed to combine them.
+
+### 10d. Useful things built
+
+| tool | what it is for |
+|---|---|
+| `field_now.py` | corrected-weight field comparison; MISSING is reported, never dropped |
+| `layer_firing.py` | per-layer override *change* rate — bounds a component's value for free |
+| `bc_hard_frames.py` | **never quote top-1 accuracy on replay data** — always-option-0 scores 0.4637. Splits EASY/HARD and compares HARD against *random* |
+| `valfeat.py` + `valnet.py` | 46-feature position evaluator, ridge, **AUC 0.7430 vs 0.6308** prize-diff, monotone deciles. Pure python. Good model, useless as a search leaf — may still be worth trying as a tiebreak INSIDE the policy |
+| `val*_extract.py`, `bc_*_extract.py` | replay -> dataset, joined to the leaderboard CSV so we clone only pilots above a score floor (median 1045) |
+| `build_v28_base.py`, `build_router.py`, `build_valnet_search.py` | the three forks above |
+
+**Every BC / value-net entry in the older ledger used `bc_lucario.npz` / `dz_luc*.npz` from the
+Mega Lucario era.** None tested the Grimmsnarl deck. "Behavioural cloning 389.3" does not mean
+what it looks like.
+
+### 10e. Where the goal stands
+
+Mirror **0.521**, and the arithmetic (§1b, and `ptcg-mirror-is-the-only-column` in memory) says
+reaching 1000 needs it near **0.85** — every other column would need a win rate above 1.0. Nothing
+this session moved the mirror. The best available change is +16 against a +114 gap, and the live
+noise floor is +/-55-85, so +16 cannot be confirmed by a single submission either way.
