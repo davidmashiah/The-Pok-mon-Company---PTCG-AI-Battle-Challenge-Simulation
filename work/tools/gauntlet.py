@@ -132,8 +132,36 @@ def load_store():
 
 def save_store(s):
     """Atomic-ish save. os.replace can transiently fail on Windows (AV scan or
-    an open handle from a killed worker); retry rather than lose the run."""
+    an open handle from a killed worker); retry rather than lose the run.
+
+    Each process writes its WHOLE snapshot, so two gauntlets running at once
+    silently lose each other's cells -- last writer wins. That really happened:
+    w80_val's mirror cell was measured, written, and then erased by a field_test
+    started while it was still running, and only survived because the win rate
+    was also in the run log. So re-read the store immediately before writing and
+    carry over any cell this process never saw.
+
+    Cells we did touch keep OUR value: the counts are cumulative, so summing two
+    snapshots that share a base would double-count it. This fixes the common
+    case (different matchups in parallel) and leaves the rare one (the same pair
+    in parallel) no worse than before."""
     os.makedirs(os.path.dirname(STORE), exist_ok=True)
+    try:
+        for key, cell in load_store().items():
+            mine = s.get(key)
+            if mine is None:
+                s[key] = cell
+                continue
+            # A cell's game count only ever GROWS, so the bigger sample is the
+            # newer one. Restoring only absent keys was not enough: a writer
+            # holding a stale copy of an EXISTING cell still clobbered a larger
+            # one. That silently destroyed a finished 1394-game mirror run and
+            # rolled it back to 396, which reads as a real measurement.
+            if (cell.get("wa", 0) + cell.get("wb", 0)) > (mine.get("wa", 0)
+                                                          + mine.get("wb", 0)):
+                s[key] = cell
+    except Exception:
+        pass
     tmp = f"{STORE}.{os.getpid()}.tmp"
     with open(tmp, "w") as f:
         json.dump(s, f, indent=1)
