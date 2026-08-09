@@ -100,17 +100,43 @@ with open(out, "w") as f:
     f.write("W = %r\n" % [round(float(x), 6) for x in w])
     f.write("B = %r\n" % round(b, 6))
     f.write("NAMES = %r\n" % names)
+    # Squash constants, measured from the RAW score on the training split, so
+    # score() lands typical positions in the informative part of the sigmoid.
+    _z = X[tr].dot(w) + b
+    f.write("CENTER = %r\n" % round(float(np.median(_z)), 6))
+    f.write("TEMP = %r\n" % round(float(max(np.std(_z), 1e-6)), 6))
     f.write('''
 
-def score(feats):
-    """feats: list[float] in NAMES order -> win probability in (0,1)."""
+def score_raw(feats):
+    """feats: list[float] in NAMES order -> RAW score. Use this to RANK.
+
+    This is a Ridge regression, so its output is unbounded: on real data it
+    spans about -21 to +35 with a median near 6. Clamping it into [0, 1] --
+    which this module used to do, and call a probability -- sent 78.5% of
+    positions to exactly 1.0 and 16% to exactly 0.0, collapsing AUC from 0.645
+    to 0.552 (0.5 being random). Two search variants were built on the clamped
+    version and both "refuted" the value net while actually ranking leaves with
+    a near-constant. Rank with score_raw; never rank with a squashed score.
+    """
     z = B
     for i, v in enumerate(feats):
         z += W[i] * v
-    if z < 0.0:
-        return 0.0
-    if z > 1.0:
-        return 1.0
     return z
+
+
+def score(feats):
+    """Monotone squash of score_raw into (0, 1), for display only.
+
+    Order-preserving, so it is safe for ranking too, but score_raw is cheaper
+    and has no saturation. TEMP is fitted from the training spread so typical
+    positions land inside the informative part of the curve instead of pinned
+    at the ends.
+    """
+    z = (score_raw(feats) - CENTER) / TEMP
+    if z < -30.0:
+        return 0.0
+    if z > 30.0:
+        return 1.0
+    return 1.0 / (1.0 + 2.718281828459045 ** (-z))
 ''')
 print(f"\nwrote {out}")
